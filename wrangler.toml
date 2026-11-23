@@ -1,4 +1,4 @@
-name = "worker-tcp-proxy"
+name = "edge-service"
 main = "src/index.ts"
 compatibility_date = "2026-11-23"
 
