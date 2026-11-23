@@ -37,7 +37,7 @@ function isPrivateIPv6(host: string): boolean {
     value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
 }
 
-export export function parseVlessRequest(data: Uint8Array, expectedUuid: string): ParsedRequest {
+export function parseVlessRequest(data: Uint8Array, expectedUuid: string): ParsedRequest {
   if (data.length < 22) throw new Error("Incomplete VLESS request header");
 
   const expected = uuidToBytes(expectedUuid);
