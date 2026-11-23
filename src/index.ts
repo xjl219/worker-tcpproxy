@@ -4,6 +4,8 @@ import { parseVlessRequest } from "./vless";
 interface Env {
   UUID: string;
   ALLOWED_PORTS?: string;
+  ALLOWED_HOSTS?: string;
+  PROXY_ENABLED?: string;
   SOCKS5_HOST: string;
   SOCKS5_PORT?: string;
   SOCKS5_USERNAME?: string;
@@ -45,6 +47,12 @@ function toBytes(data: unknown): Uint8Array {
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   throw new Error("Only binary WebSocket messages are supported");
+}
+
+function allowedHosts(env: Env): Set<string> {
+  const raw = env.ALLOWED_HOSTS?.trim();
+  if (!raw) return new Set();
+  return new Set(raw.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
 }
 
 function allowedPorts(env: Env): Set<number> {
@@ -202,7 +210,10 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return response("Expected WebSocket upgrade", 426);
   }
-  if (!env.UUID) return response("Service unavailable", 503);
+  if (env.PROXY_ENABLED !== "true") return response("Proxy is disabled", 503);
+  if (!env.UUID || !env.SOCKS5_HOST?.trim() || allowedHosts(env).size === 0) {
+    return response("Proxy is not configured", 503);
+  }
 
   const pair = new WebSocketPair();
   const client = pair[0];
@@ -232,6 +243,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
       if (!initialized) {
         const parsed = parseVlessRequest(bytes, env.UUID);
         if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
+        if (!allowedHosts(env).has(parsed.hostname.toLowerCase())) throw new Error("Destination host is not allowed");
 
         const connection = await connectViaSocks5(env, parsed.hostname, parsed.port);
         upstream = connection.socket;
@@ -266,9 +278,9 @@ export default {
     if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
 
     if (url.pathname === "/health") {
-      const configured = Boolean(env.SOCKS5_HOST?.trim());
+      const configured = Boolean(env.SOCKS5_HOST?.trim() && allowedHosts(env).size > 0);
       return Response.json(
-        { ok: true, service: "worker-tcpproxy-socks5", socks5Configured: configured },
+        { ok: true, service: "worker-tcpproxy-socks5", proxyEnabled: env.PROXY_ENABLED === "true", socks5Configured: configured },
         { headers: SECURITY_HEADERS },
       );
     }
