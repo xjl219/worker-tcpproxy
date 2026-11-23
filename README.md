@@ -1,23 +1,68 @@
+# Worker TCP Proxy — SOCKS5 upstream v1
 
+This version keeps the VLESS-over-WebSocket ingress but routes every accepted destination through a configured SOCKS5 upstream. The Worker does not silently fall back to direct Cloudflare TCP egress.
 
-## Security controls
+## Flow
 
-The Worker applies basic defense-in-depth controls:
+`VLESS client -> Cloudflare Worker -> configured SOCKS5 server -> allowlisted destination`
 
-- Only GET is accepted for the public HTTP endpoints and WebSocket handshake.
-- Unknown paths and common scanner targets (including `.env`, `.git`, `.vscode`, `actuator`, and common admin paths) return a generic 404.
-- Responses include `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
-- VLESS UUID validation remains mandatory before any outbound TCP socket is opened.
-- Destination ports are restricted by `ALLOWED_PORTS`; private, loopback, link-local, carrier-grade NAT, documentation, benchmarking, multicast, and other non-public IP literals are rejected.
-- WebSocket messages remain limited to 8 MiB, and upstream buffering is bounded.
+The SOCKS5 server determines the final network egress. A successful Worker deployment does not prove that the SOCKS5 server is reachable or that its public egress IP is in the intended country; verify those separately with an authorized test endpoint.
 
-### Required Cloudflare-side controls
+## Fail-closed security defaults
 
-Application code cannot reliably rate-limit requests across Worker isolates. Add Cloudflare WAF / rate-limiting rules for the zone hosting the custom domain:
+- Proxy access is disabled unless `PROXY_ENABLED=true`.
+- A non-empty exact-match `ALLOWED_HOSTS` list is required. Wildcards and suffix matching are not supported.
+- Destination ports are restricted by `ALLOWED_PORTS`.
+- The VLESS UUID is required before any upstream socket is opened.
+- Private/local destination IP literals are rejected by the VLESS parser.
+- The Worker has no direct-egress fallback: if SOCKS5 connection, authentication, or CONNECT fails, the session fails closed.
+- HTTP endpoints and WebSocket handling retain method/path checks and security response headers.
 
-1. Challenge or block repeated requests to sensitive paths such as `/.env`, `/.git/*`, `/.vscode/*`, and `/actuator/*`.
-2. Rate-limit repeated requests to `/ws` per source IP. Start conservatively so legitimate reconnects are not blocked; tune from observed traffic.
-3. Keep the UUID in the Worker secret named `UUID`; never put it in source code, query strings, logs, or public client profiles.
-4. Review Security Events and Worker invocation logs after enabling rules. Do not block all Go clients by User-Agent; legitimate clients can use Go's HTTP library.
+The host allowlist is exact string matching; it does not resolve DNS or guarantee that an allowed hostname cannot resolve to a private address. Use only trusted destinations and a controlled SOCKS5 server. Do not expose this Worker as a public, unrestricted relay.
 
-These controls do not provide a distributed concurrent-connection quota, and the IP-literal checks do not fully prevent DNS rebinding to private addresses. Treat this as baseline hardening, not a substitute for a managed rate limiter or a strict destination allowlist.
+## Configuration
+
+Set the following in the Cloudflare Worker settings. Do not commit real credentials.
+
+| Name | Type | Required | Purpose |
+|---|---|---:|---|
+| `UUID` | Secret | Yes | VLESS client UUID |
+| `SOCKS5_HOST` | Variable | Yes | Hostname or public IP of your authorized SOCKS5 server |
+| `SOCKS5_PORT` | Variable | No | SOCKS5 port; defaults to 1080 |
+| `SOCKS5_USERNAME` | Secret | No | SOCKS5 username; set with password |
+| `SOCKS5_PASSWORD` | Secret | No | SOCKS5 password; set with username |
+| `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable |
+| `ALLOWED_HOSTS` | Variable | Yes | Comma-separated exact destination hostnames |
+| `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
+
+Start with a narrow host list for the applications you intend to use. Example only: `generativelanguage.googleapis.com,api.anthropic.com`. Add other required hostnames only after reviewing them.
+
+Example secret commands (run locally; never paste secret values into chat):
+
+```sh
+npx wrangler secret put UUID
+npx wrangler secret put SOCKS5_USERNAME
+npx wrangler secret put SOCKS5_PASSWORD
+```
+
+Set `SOCKS5_HOST`, `SOCKS5_PORT`, `PROXY_ENABLED`, `ALLOWED_HOSTS`, and `ALLOWED_PORTS` in the Worker Variables settings. Keep `PROXY_ENABLED=false` until the upstream and access policy have been reviewed.
+
+## Staged verification
+
+1. Deploy this as a separate Worker name; do not overwrite the existing service.
+2. Check `/health`. It reports whether proxying is enabled and whether the SOCKS5 host and destination allowlist are configured; it does not test credentials or connectivity.
+3. With proxying still disabled, confirm `/ws` returns 503.
+4. Configure the authorized SOCKS5 server and a narrow destination allowlist. Enable only for a controlled test.
+5. Verify SOCKS5 authentication and CONNECT using an approved destination.
+6. Verify the observed public egress IP using a test endpoint you control or are authorized to use.
+7. Test streaming and reconnect behavior before considering production use.
+
+Do not use hostname or deployment changes to evade a provider restriction or abuse review. If the platform has restricted a service, resolve that restriction through its official process before enabling public traffic.
+
+## Known limitations
+
+- SOCKS5 TCP CONNECT only; no UDP ASSOCIATE.
+- One SOCKS5 upstream per Worker deployment; no pool or automatic failover in v1.
+- No direct egress fallback by design.
+- DNS resolution for destination domains is delegated to the SOCKS5 server.
+- This initial implementation has not yet passed a live Cloudflare deployment or end-to-end SOCKS5 test. Treat it as an implementation candidate until those checks pass.
