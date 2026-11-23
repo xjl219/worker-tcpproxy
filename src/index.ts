@@ -35,7 +35,7 @@ function isSensitivePath(pathname: string): boolean {
   } catch {
     return true;
   }
-  const normalized = decoded.replace(/\\\\/g, "/");
+  const normalized = decoded.replace(/\\/g, "/");
   return normalized.split("/").some((part) =>
     part === ".env" || part === ".git" || part === ".vscode" ||
     part === ".svn" || part === ".hg" || part === "actuator" ||
