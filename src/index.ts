@@ -6,7 +6,9 @@ interface Env {
   ALLOWED_PORTS?: string;
   ALLOWED_HOSTS?: string;
   PROXY_ENABLED?: string;
-  SOCKS5_HOST: string;
+  OUTBOUND_MODE?: string;
+  RELAY_ENDPOINTS?: string;
+  SOCKS5_HOST?: string;
   SOCKS5_PORT?: string;
   SOCKS5_USERNAME?: string;
   SOCKS5_PASSWORD?: string;
@@ -205,13 +207,65 @@ async function connectViaSocks5(
   }
 }
 
+
+type UpstreamConnection = {
+  socket: ReturnType<typeof connect>;
+  reader: SocketReader;
+  writer: WritableStreamDefaultWriter<Uint8Array>;
+};
+
+async function connectDirect(host: string, port: number): Promise<UpstreamConnection> {
+  const socket = connect({ hostname: host, port }, { allowHalfOpen: true });
+  await socket.opened;
+  return { socket, writer: socket.writable.getWriter(), reader: new SocketReader(socket.readable) };
+}
+
+function relayCandidates(env: Env): Array<{ hostname: string; port: number }> {
+  return (env.RELAY_ENDPOINTS || "").split(/[;,\n]+/).map((item) => item.trim()).filter(Boolean).map((item) => {
+    const match = /^([^:\s]+):(\d{1,5})$/.exec(item);
+    if (!match) throw new Error("RELAY_ENDPOINTS entries must use host:port format");
+    const port = Number(match[2]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid relay port");
+    return { hostname: match[1], port };
+  });
+}
+
+function stableIndex(value: string, count: number): number {
+  let hash = 2166136261;
+  for (const char of value.toLowerCase()) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return (hash >>> 0) % count;
+}
+
+async function connectViaRelay(env: Env, destinationHost: string, destinationPort: number): Promise<UpstreamConnection> {
+  if (destinationPort !== 443) throw new Error("SNI relay mode supports destination port 443 only");
+  const candidates = relayCandidates(env);
+  if (!candidates.length) throw new Error("RELAY_ENDPOINTS is not configured");
+  // Stable per destination: avoids changing relay egress on every reconnect.
+  const endpoint = candidates[stableIndex(destinationHost, candidates.length)];
+  const socket = connect(endpoint, { allowHalfOpen: true });
+  await socket.opened;
+  return { socket, writer: socket.writable.getWriter(), reader: new SocketReader(socket.readable) };
+}
+
+async function connectOutbound(env: Env, host: string, port: number): Promise<UpstreamConnection> {
+  const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
+  if (mode === "direct") return connectDirect(host, port);
+  if (mode === "socks5") return connectViaSocks5(env, host, port);
+  if (mode === "relay") return connectViaRelay(env, host, port);
+  throw new Error("OUTBOUND_MODE must be direct, relay, or socks5");
+}
+
 async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return response("Expected WebSocket upgrade", 426);
   }
   if (env.PROXY_ENABLED !== "true") return response("Proxy is disabled", 503);
-  if (!env.UUID || !env.SOCKS5_HOST?.trim() || allowedHosts(env).size === 0) {
+  const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
+  const modeConfigured = mode === "direct" ||
+    (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
+    (mode === "relay" && relayCandidates(env).length > 0);
+  if (!env.UUID || !modeConfigured || allowedHosts(env).size === 0) {
     return response("Proxy is not configured", 503);
   }
 
@@ -245,7 +299,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
         if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
         if (!allowedHosts(env).has(parsed.hostname.toLowerCase())) throw new Error("Destination host is not allowed");
 
-        const connection = await connectViaSocks5(env, parsed.hostname, parsed.port);
+        const connection = await connectOutbound(env, parsed.hostname, parsed.port);
         upstream = connection.socket;
         upstreamWriter = connection.writer;
         initialized = true;
@@ -278,14 +332,17 @@ export default {
     if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
 
     if (url.pathname === "/health") {
-      const configured = Boolean(env.SOCKS5_HOST?.trim() && allowedHosts(env).size > 0);
+      const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
+      const configured = mode === "direct" ||
+        (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
+        (mode === "relay" && relayCandidates(env).length > 0);
       return Response.json(
-        { ok: true, service: "worker-tcpproxy-socks5", proxyEnabled: env.PROXY_ENABLED === "true", socks5Configured: configured },
+        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: configured, allowedHostsConfigured: allowedHosts(env).size > 0 },
         { headers: SECURITY_HEADERS },
       );
     }
     if (url.pathname === "/") {
-      return response("Worker TCP Proxy (SOCKS5 upstream) is running.", 200, { "content-type": "text/plain; charset=utf-8" });
+      return response("Worker TCP Proxy is running.", 200, { "content-type": "text/plain; charset=utf-8" });
     }
     if (url.pathname === "/ws") return handleWebSocket(request, env);
     return response("Not found", 404);
