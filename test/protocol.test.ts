@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVlessRequest } from "../src/index";
+import { parseVlessRequest } from "../src/vless";
 
 const UUID = "00000000-0000-4000-8000-000000000001";
 
