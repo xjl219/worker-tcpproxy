@@ -110,7 +110,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, service: "worker-tcp-proxy", protocol: "vless-ws-tcp" });
+      return Response.json({ ok: true, service: "edge-service", protocol: "vless-ws-tcp" });
     }
     if (url.pathname === "/") {
       return new Response("Worker TCP Proxy is running. WebSocket endpoint: /ws", {
