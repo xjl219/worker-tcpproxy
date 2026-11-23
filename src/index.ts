@@ -159,7 +159,9 @@ async function connectViaSocks5(
   if ((username.length > 0) !== (password.length > 0)) {
     throw new Error("Both SOCKS5_USERNAME and SOCKS5_PASSWORD must be set together");
   }
-  if (username.length > 255 || password.length > 255) throw new Error("SOCKS5 credentials exceed protocol limits");
+  const usernameBytes = new TextEncoder().encode(username);
+  const passwordBytes = new TextEncoder().encode(password);
+  if (usernameBytes.length > 255 || passwordBytes.length > 255) throw new Error("SOCKS5 credentials exceed protocol limits");
 
   const socket = connect({ hostname: env.SOCKS5_HOST.trim(), port: proxyPort }, { allowHalfOpen: true });
   await socket.opened;
@@ -172,9 +174,7 @@ async function connectViaSocks5(
     if (greeting[0] !== 5 || greeting[1] === 255) throw new Error("SOCKS5 proxy rejected authentication methods");
     if (greeting[1] === 2) {
       if (!username) throw new Error("SOCKS5 proxy requires username/password authentication");
-      const userBytes = new TextEncoder().encode(username);
-      const passBytes = new TextEncoder().encode(password);
-      await writer.write(new Uint8Array([1, userBytes.length, ...userBytes, passBytes.length, ...passBytes]));
+      await writer.write(new Uint8Array([1, usernameBytes.length, ...usernameBytes, passwordBytes.length, ...passwordBytes]));
       const authReply = await reader.readExactly(2);
       if (authReply[0] !== 1 || authReply[1] !== 0) throw new Error("SOCKS5 authentication failed");
     } else if (greeting[1] !== 0) {
