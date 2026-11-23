@@ -17,7 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Check types and tests
         run: npm run check
       - name: Deploy to Cloudflare Workers
@@ -25,3 +25,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Upload VLESS UUID secret
+        env:
+          WORKER_UUID: ${{ secrets.WORKER_UUID }}
+        run: |
+          test -n "$WORKER_UUID" || (echo "Missing GitHub secret WORKER_UUID" && exit 1)
+          printf '%s' "$WORKER_UUID" | npx wrangler secret put UUID
