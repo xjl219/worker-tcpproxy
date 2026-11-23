@@ -1,68 +1,74 @@
-# Worker TCP Proxy — SOCKS5 upstream v1
+# Worker TCP Proxy — pluggable outbound v1
 
-This version keeps the VLESS-over-WebSocket ingress but routes every accepted destination through a configured SOCKS5 upstream. The Worker does not silently fall back to direct Cloudflare TCP egress.
+VLESS over WebSocket ingress with three selectable outbound modes:
+
+- `direct` (default): Cloudflare Worker opens a TCP socket directly to the requested destination using `cloudflare:sockets`.
+- `relay`: Worker opens TCP to an explicitly configured SNI relay endpoint and forwards the client's original TLS stream unchanged. This mode is for TLS/SNI traffic to destination port 443 only.
+- `socks5`: Worker establishes SOCKS5 CONNECT to an explicitly configured upstream.
+
+`OUTBOUND_MODE` selects exactly one mode. There is no automatic cross-mode fallback: a failed route fails closed. This avoids silently changing the network egress or destination path.
 
 ## Flow
 
-`VLESS client -> Cloudflare Worker -> configured SOCKS5 server -> allowlisted destination`
-
-The SOCKS5 server determines the final network egress. A successful Worker deployment does not prove that the SOCKS5 server is reachable or that its public egress IP is in the intended country; verify those separately with an authorized test endpoint.
-
-## Fail-closed security defaults
-
-- Proxy access is disabled unless `PROXY_ENABLED=true`.
-- A non-empty exact-match `ALLOWED_HOSTS` list is required. Wildcards and suffix matching are not supported.
-- Destination ports are restricted by `ALLOWED_PORTS`.
-- The VLESS UUID is required before any upstream socket is opened.
-- Private/local destination IP literals are rejected by the VLESS parser.
-- The Worker has no direct-egress fallback: if SOCKS5 connection, authentication, or CONNECT fails, the session fails closed.
-- HTTP endpoints and WebSocket handling retain method/path checks and security response headers.
-
-The host allowlist is exact string matching; it does not resolve DNS or guarantee that an allowed hostname cannot resolve to a private address. Use only trusted destinations and a controlled SOCKS5 server. Do not expose this Worker as a public, unrestricted relay.
+```
+VLESS client -> Cloudflare Worker -> selected outbound adapter
+                                  |-> direct TCP -> destination
+                                  |-> SNI relay TCP -> TLS/SNI destination (443)
+                                  |-> SOCKS5 CONNECT -> destination
+```
 
 ## Configuration
-
-Set the following in the Cloudflare Worker settings. Do not commit real credentials.
 
 | Name | Type | Required | Purpose |
 |---|---|---:|---|
 | `UUID` | Secret | Yes | VLESS client UUID |
-| `SOCKS5_HOST` | Variable | Yes | Hostname or public IP of your authorized SOCKS5 server |
-| `SOCKS5_PORT` | Variable | No | SOCKS5 port; defaults to 1080 |
-| `SOCKS5_USERNAME` | Secret | No | SOCKS5 username; set with password |
-| `SOCKS5_PASSWORD` | Secret | No | SOCKS5 password; set with username |
-| `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable |
+| `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
+| `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
 | `ALLOWED_HOSTS` | Variable | Yes | Comma-separated exact destination hostnames |
 | `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
+| `RELAY_ENDPOINTS` | Variable | Relay only | Comma-separated `host:port` relay endpoints |
+| `SOCKS5_HOST` | Variable | SOCKS5 only | Authorized SOCKS5 server hostname/IP |
+| `SOCKS5_PORT` | Variable | No | SOCKS5 port; defaults to 1080 |
+| `SOCKS5_USERNAME` | Secret | No | Set together with password |
+| `SOCKS5_PASSWORD` | Secret | No | Set together with username |
 
-Start with a narrow host list for the applications you intend to use. Example only: `generativelanguage.googleapis.com,api.anthropic.com`. Add other required hostnames only after reviewing them.
+Example safe initial configuration:
 
-Example secret commands (run locally; never paste secret values into chat):
+- `OUTBOUND_MODE=direct`
+- `PROXY_ENABLED=false` until access controls and destinations have been reviewed
+- `ALLOWED_HOSTS` contains only the exact hosts you are authorized to access
 
-```sh
-npx wrangler secret put UUID
-npx wrangler secret put SOCKS5_USERNAME
-npx wrangler secret put SOCKS5_PASSWORD
-```
+For relay mode, configure only relay endpoints that you own or are explicitly authorized to use. Each entry uses `host:port`; the current v1 parser expects a hostname or IPv4-style host and does not support bracketed IPv6 endpoints. The same destination hostname always selects the same configured relay within an isolate. There is no health-based failover or automatic public feed ingestion in v1.
 
-Set `SOCKS5_HOST`, `SOCKS5_PORT`, `PROXY_ENABLED`, `ALLOWED_HOSTS`, and `ALLOWED_PORTS` in the Worker Variables settings. Keep `PROXY_ENABLED=false` until the upstream and access policy have been reviewed.
+Relay mode forwards the original client TLS bytes; it does not create a new TLS session to the relay. The relay must implement compatible SNI-based forwarding. It is restricted to destination port 443, but this does not itself prove the client stream contains a valid TLS ClientHello or that the relay reaches the intended destination. Verify using a relay you control and a destination you are authorized to test.
+
+## Security behavior
+
+- Proxying is disabled unless `PROXY_ENABLED=true`.
+- VLESS UUID validation is required before any outbound socket is opened.
+- Exact-match `ALLOWED_HOSTS` and `ALLOWED_PORTS` restrictions apply to all modes.
+- Private/local IP literals are rejected by the VLESS parser.
+- No fallback between direct, relay, and SOCKS5 modes.
+- HTTP endpoints retain method/path checks and security response headers.
+- WebSocket messages and buffered output remain bounded.
+
+Host allowlisting is not a complete DNS-rebinding defense. Use a narrow list of trusted destinations and keep this Worker private to intended clients. Configure Cloudflare WAF/rate limits for the deployed hostname.
 
 ## Staged verification
 
-1. Deploy this as a separate Worker name; do not overwrite the existing service.
-2. Check `/health`. It reports whether proxying is enabled and whether the SOCKS5 host and destination allowlist are configured; it does not test credentials or connectivity.
-3. With proxying still disabled, confirm `/ws` returns 503.
-4. Configure the authorized SOCKS5 server and a narrow destination allowlist. Enable only for a controlled test.
-5. Verify SOCKS5 authentication and CONNECT using an approved destination.
-6. Verify the observed public egress IP using a test endpoint you control or are authorized to use.
-7. Test streaming and reconnect behavior before considering production use.
-
-Do not use hostname or deployment changes to evade a provider restriction or abuse review. If the platform has restricted a service, resolve that restriction through its official process before enabling public traffic.
+1. Deploy under the separate Worker name in `wrangler.toml`; do not overwrite an existing service.
+2. Set `OUTBOUND_MODE=direct`, configure `UUID` and a narrow `ALLOWED_HOSTS`, and keep `PROXY_ENABLED=false`.
+3. Confirm `/health` reports the selected mode and configuration flags. It does not test outbound connectivity.
+4. Enable only for a controlled test and verify a permitted destination.
+5. Record the observed egress IP and independently check its geolocation; a successful request does not prove a US exit.
+6. Test sustained bidirectional traffic, reconnects, and error handling before any broader use.
+7. Test relay or SOCKS5 only after direct mode has been measured and an authorized upstream is available.
 
 ## Known limitations
 
-- SOCKS5 TCP CONNECT only; no UDP ASSOCIATE.
-- One SOCKS5 upstream per Worker deployment; no pool or automatic failover in v1.
-- No direct egress fallback by design.
-- DNS resolution for destination domains is delegated to the SOCKS5 server.
-- This initial implementation has not yet passed a live Cloudflare deployment or end-to-end SOCKS5 test. Treat it as an implementation candidate until those checks pass.
+- TCP only; no UDP ASSOCIATE.
+- Relay mode is TLS/SNI pass-through on port 443, not a general-purpose relay for arbitrary protocols.
+- Relay selection is deterministic per destination within an isolate; no health scoring or automatic failover.
+- SOCKS5 supports CONNECT only; no UDP ASSOCIATE.
+- No built-in public relay list. Public feed entries have unknown ownership, authorization, location, and stability and are not trusted by default.
+- This implementation has not yet passed typecheck, automated tests, live deployment, or end-to-end traffic tests. Treat it as an implementation candidate until those checks pass.
