@@ -23,18 +23,23 @@ function bytesToIPv6(bytes: Uint8Array): string {
 
 function isPrivateIPv4(host: string): boolean {
   const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((p) => !/^\d{1,3}$/.test(p) || Number(p) > 255)) return false;
-  const [a, b] = parts.map(Number);
+  if (parts.length !== 4 || parts.some((p) => !/^\\d{1,3}$/.test(p) || Number(p) > 255)) return false;
+  const [a, b, c] = parts.map(Number);
   return a === 0 || a === 10 || a === 127 || a >= 224 ||
     (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+    (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2) || (b === 0 && c === 0))) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113);
 }
 
 function isPrivateIPv6(host: string): boolean {
   const value = host.toLowerCase();
-  return value === "::" || value === "::1" || value.startsWith("fc") ||
-    value.startsWith("fd") || /^fe[89ab]/.test(value) || value.startsWith("::ffff:127.") ||
-    value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
+  if (value === "::" || value === "::1") return true;
+  if (value.startsWith("fc") || value.startsWith("fd") || /^fe[89ab]/.test(value)) return true;
+  if (value.startsWith("ff")) return true;
+  const mapped = value.match(/^::ffff:(\\d{1,3}(?:\\.\\d{1,3}){3})$/);
+  return mapped ? isPrivateIPv4(mapped[1]) : false;
 }
 
 export function parseVlessRequest(data: Uint8Array, expectedUuid: string): ParsedRequest {
@@ -77,8 +82,8 @@ export function parseVlessRequest(data: Uint8Array, expectedUuid: string): Parse
   }
 
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid destination port");
-  if (hostname.length > 253 || /[^a-zA-Z0-9.\-_:]/.test(hostname)) throw new Error("Invalid destination hostname");
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname.length > 253 || /[^a-zA-Z0-9.\\-_:]/.test(hostname)) throw new Error("Invalid destination hostname");
+  const normalized = hostname.toLowerCase().replace(/^\\[|\\]$/g, "");
   if (normalized === "localhost" || normalized.endsWith(".localhost") ||
       normalized.endsWith(".local") || normalized.endsWith(".internal") ||
       isPrivateIPv4(normalized) || isPrivateIPv6(normalized)) {
@@ -88,4 +93,3 @@ export function parseVlessRequest(data: Uint8Array, expectedUuid: string): Parse
   const payloadOffset = addressOffset + addressLength;
   return { version, hostname, port, payload: data.slice(payloadOffset) };
 }
-
