@@ -117,8 +117,8 @@ class SocketReader {
 }
 
 function encodeSocksAddress(hostname: string): Uint8Array {
-  const host = hostname.replace(/^\\[|\\]$/g, "");
-  const ipv4 = host.match(/^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$/);
+  const host = hostname;
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4 && ipv4.every((part) => Number(part) <= 255)) {
     return new Uint8Array([1, ...ipv4.map(Number)]);
   }
