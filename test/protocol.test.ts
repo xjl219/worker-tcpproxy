@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseVlessRequest } from "../src/vless";
+import { encodeSocksAddress } from "../src/socks5";
 
 const UUID = "00000000-0000-4000-8000-000000000001";
 
@@ -35,5 +36,27 @@ describe("VLESS request parser", () => {
     const data = makeRequest("example.com");
     data[18] = 2;
     expect(() => parseVlessRequest(data, UUID)).toThrow("Only VLESS TCP");
+  });
+});
+
+
+describe("SOCKS5 destination address encoding", () => {
+  it("encodes IPv4 as ATYP 1 with four address octets", () => {
+    expect(Array.from(encodeSocksAddress("8.8.4.4"))).toEqual([1, 8, 8, 4, 4]);
+  });
+
+  it("encodes domains as ATYP 3", () => {
+    expect(Array.from(encodeSocksAddress("example.com"))).toEqual([
+      3, 11, ...new TextEncoder().encode("example.com"),
+    ]);
+  });
+
+  it("encodes compressed IPv6 as ATYP 4 with sixteen address bytes", () => {
+    const encoded = encodeSocksAddress("2001:db8::1");
+    expect(encoded[0]).toBe(4);
+    expect(encoded).toHaveLength(17);
+    expect(Array.from(encoded.slice(1))).toEqual([
+      0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+    ]);
   });
 });
