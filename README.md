@@ -70,7 +70,7 @@ curl http://127.0.0.1:8787/health
 Expected shape:
 
 ```json
-{"ok":true,"service":"worker-tcp-proxy","protocol":"vless-ws-tcp"}
+{"ok":true,"service":"edge-service","protocol":"vless-ws-tcp"}
 ```
 
 The health request verifies that the Worker is responding; it does **not** verify VLESS authentication or an end-to-end TCP tunnel. Use a VLESS-capable client for the end-to-end test below.
