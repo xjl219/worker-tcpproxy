@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local development. Never commit real secrets.
+UUID=00000000-0000-4000-8000-000000000001
