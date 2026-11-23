@@ -1,4 +1,4 @@
-name = "edge-service"
+name = "worker-tcpproxy-socks5-v1"
 main = "src/index.ts"
 compatibility_date = "2026-11-23"
 
@@ -6,4 +6,7 @@ compatibility_date = "2026-11-23"
 enabled = true
 
 [vars]
+PROXY_ENABLED = "false"
 ALLOWED_PORTS = "80,443,8080,8443,2053,2083,2087,2096"
+# Set ALLOWED_HOSTS in the Cloudflare dashboard or wrangler vars after reviewing the exact domains.
+SOCKS5_PORT = "1080"
