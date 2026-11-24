@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,12 +28,12 @@ export function parseSecretNames(output) {
   return new Set(entries.map((entry) => entry?.name).filter((name) => typeof name === "string"));
 }
 
-export function resolveDeploymentUuid({ configuredUuid, secretNames }) {
+export function resolveDeploymentUuid({ configuredUuid, secretNames, generatedUuid = randomUUID() }) {
   if (configuredUuid !== undefined && configuredUuid !== "") {
     return { action: "set", uuid: validateUuid(configuredUuid) };
   }
   if (secretNames.has("UUID")) return { action: "reuse", uuid: null };
-  return { action: "set", uuid: randomUUID() };
+  return { action: "set", uuid: validateUuid(generatedUuid) };
 }
 
 function runWrangler(args, input) {
@@ -51,16 +51,56 @@ function runWrangler(args, input) {
   return result.stdout ?? "";
 }
 
+function listRemoteSecretNames() {
+  const command = process.platform === "win32" ? "npx.cmd" : "npx";
+  const result = spawnSync(command, ["wrangler", "secret", "list", "--format", "json"], {
+    encoding: "utf8",
+    shell: process.platform === "win32",
+    stdio: ["inherit", "pipe", "pipe"],
+  });
+  if (result.error) throw result.error;
+  if (result.status === 0) return parseSecretNames(result.stdout ?? "");
+
+  const diagnostic = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.toLowerCase();
+  // A missing Worker is expected on first deployment. Other failures (especially
+  // authentication/permission errors) must stop instead of risking credential rotation.
+  if (diagnostic.includes("worker not found") || diagnostic.includes("script not found") ||
+      diagnostic.includes("worker does not exist") || diagnostic.includes("script does not exist")) {
+    return null;
+  }
+  throw new Error("Unable to inspect Cloudflare Worker secrets; refusing to rotate the proxy UUID");
+}
+
+function readSavedUuid() {
+  const savedPath = join(process.cwd(), ".wrangler", "proxy-uuid.txt");
+  if (!existsSync(savedPath)) return undefined;
+  return validateUuid(readFileSync(savedPath, "utf8"));
+}
+
+function saveGeneratedUuid(uuid) {
+  const directory = join(process.cwd(), ".wrangler");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  writeFileSync(join(directory, "proxy-uuid.txt"), uuid + "\\n", { mode: 0o600 });
+}
+
 async function main() {
   const configuredUuid = process.env.PROXY_UUID ?? process.env.UUID;
   let secretNames = new Set();
+  let remoteWorkerExists = true;
+  let savedUuid;
 
   if (configuredUuid === undefined || configuredUuid === "") {
-    const output = runWrangler(["secret", "list", "--format", "json"]);
-    secretNames = parseSecretNames(output);
+    const remoteSecrets = listRemoteSecretNames();
+    remoteWorkerExists = remoteSecrets !== null;
+    if (remoteWorkerExists) secretNames = remoteSecrets;
+    savedUuid = readSavedUuid();
   }
 
-  const decision = resolveDeploymentUuid({ configuredUuid, secretNames });
+  const decision = resolveDeploymentUuid({
+    configuredUuid,
+    secretNames,
+    generatedUuid: savedUuid ?? randomUUID(),
+  });
   if (decision.action === "reuse") {
     process.stdout.write("Reusing the existing Cloudflare UUID secret.\n");
     runWrangler(["deploy"]);
