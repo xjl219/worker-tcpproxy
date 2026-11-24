@@ -1,13 +1,13 @@
 const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function normalizeDestinationHostname(input: string): string {
-  const host = input.trim().toLowerCase().replace(/\\.$/, "");
+  const host = input.trim().toLowerCase().replace(/\.$/, "");
   if (!host || host.length > 253 || host.includes("*") || host.includes("/") ||
       host.includes("@") || host.includes(":") || host.includes("%") ||
-      host.includes("\\\\") || /\\s/.test(host)) {
+      host.includes("\\") || /\s/.test(host)) {
     throw new Error("Destination must be a DNS hostname");
   }
-  if (/^\\d+(?:\\.\\d+){0,3}$/.test(host)) {
+  if (/^\d+(?:\.\d+){0,3}$/.test(host)) {
     throw new Error("IP-literal destinations are not allowed");
   }
   const labels = host.split(".");
