@@ -60,3 +60,34 @@ describe("SOCKS5 destination address encoding", () => {
     ]);
   });
 });
+
+
+import { isAllowedDestinationHost, normalizeDestinationHostname, parseAllowedHosts } from "../src/security";
+
+describe("destination hostname allowlist", () => {
+  it("normalizes case and a terminal DNS dot before exact matching", () => {
+    const allowed = parseAllowedHosts("Gemini.Google.com");
+    expect(isAllowedDestinationHost("gemini.google.com.", allowed)).toBe(true);
+  });
+
+  it("does not treat a parent domain as a wildcard", () => {
+    const allowed = parseAllowedHosts("google.com");
+    expect(isAllowedDestinationHost("evilgoogle.com", allowed)).toBe(false);
+    expect(isAllowedDestinationHost("sub.google.com", allowed)).toBe(false);
+  });
+
+  it("rejects wildcard entries and URL-like allowlist values", () => {
+    expect(() => parseAllowedHosts("*.google.com")).toThrow();
+    expect(() => parseAllowedHosts("https://google.com")).toThrow();
+  });
+
+  it.each(["localhost", "127.0.0.1", "2130706433", "a..google.com", "-bad.google.com"])(
+    "rejects invalid or non-DNS destination %s", (host) => {
+      expect(() => normalizeDestinationHostname(host)).toThrow();
+    },
+  );
+
+  it("rejects empty allowlist entries instead of silently ignoring them", () => {
+    expect(() => parseAllowedHosts("gemini.google.com,,api.anthropic.com")).toThrow();
+  });
+});
