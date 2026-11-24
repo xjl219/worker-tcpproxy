@@ -10,6 +10,7 @@ interface Env {
   ALLOWED_HOSTS?: string;
   DOMAIN_FILTER_ENABLED?: string;
   PROXY_ENABLED?: string;
+  HEALTH_ENABLED?: string;
   OUTBOUND_MODE?: string;
   RELAY_ENDPOINTS?: string;
   SOCKS5_HOST?: string;
@@ -280,9 +281,9 @@ async function connectOutbound(env: Env, host: string, port: number): Promise<Up
 }
 
 async function handleWebSocket(request: Request, env: Env): Promise<Response> {
-  if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
+  if (request.method !== "GET") return response("Not found", 404);
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-    return response("Expected WebSocket upgrade", 426);
+    return response("Not found", 404);
   }
   if (env.PROXY_ENABLED !== "true") return response("Not found", 404);
   const domainFilterEnabled = isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED);
@@ -353,7 +354,8 @@ export default {
     if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
 
     if (url.pathname === "/health") {
-      // Keep health output intentionally generic; never expose proxy mode or configuration state.
+      // Health is opt-in. Keep the default public surface to the authenticated proxy endpoint only.
+      if (env.HEALTH_ENABLED !== "true") return response("Not found", 404);
       return Response.json({ ok: true }, { headers: SECURITY_HEADERS });
     }
     if (url.pathname === "/") return response("Not found", 404);
