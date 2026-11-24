@@ -80,7 +80,7 @@ function readSavedUuid() {
 function saveGeneratedUuid(uuid) {
   const directory = join(process.cwd(), ".wrangler");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  writeFileSync(join(directory, "proxy-uuid.txt"), uuid + "\\n", { mode: 0o600 });
+  writeFileSync(join(directory, "proxy-uuid.txt"), uuid + String.fromCharCode(10), { mode: 0o600 });
 }
 
 async function main() {
@@ -117,7 +117,7 @@ async function main() {
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true });
   }
-  process.stdout.write(configuredUuid ? "Deployed with the supplied UUID secret.\\n" : "Generated and deployed a new UUID secret.\\n");
+  process.stdout.write((configuredUuid ? "Deployed with the supplied UUID secret." : "Generated and deployed a new UUID secret.") + String.fromCharCode(10));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
