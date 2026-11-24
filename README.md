@@ -24,8 +24,7 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 | `UUID` | Secret | Yes | VLESS client UUID; the secure deploy command creates it on first deployment and reuses the Cloudflare secret on later deployments |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
 | `PROXY_ENABLED` | Dashboard variable | Yes | Set in Cloudflare Worker Settings → Variables; keep `false` until acceptance is complete; only literal `true` enables proxying |
-| `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |
-| `ALLOWED_HOSTS` | Variable | When filtering is enabled | Comma-separated DNS root domains; each entry allows that domain and its subdomains. No wildcard, URL, path, port, or IP-literal entries. |
+| `ALLOWED_HOSTS` | Dashboard variable | Yes | Comma-separated exact destination hostnames. Every destination must match one entry exactly; subdomains are not inherited. No wildcard, URL, path, or port entries. |
 | `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
 | `RELAY_ENDPOINTS` | Variable | Relay only | Comma-separated `host:port` relay endpoints |
 | `SOCKS5_HOST` | Variable | SOCKS5 only | Authorized SOCKS5 server hostname/IP |
@@ -74,7 +73,7 @@ Example safe initial configuration:
 
 - `OUTBOUND_MODE=direct`
 - In Cloudflare Dashboard, set `PROXY_ENABLED=false` until configuration and controlled tests are complete
-- `DOMAIN_FILTER_ENABLED=false` (default); `ALLOWED_HOSTS` may be left unset while filtering is disabled
+- Set `ALLOWED_HOSTS` to the exact destination hostnames required by the client; the proxy remains disabled if the list is missing or invalid
 - Do not create or enable a Cloudflare Access application for the initial workers.dev deployment
 - Do not configure WAF rules for this initial workers.dev deployment; workers.dev is Cloudflare-managed and does not provide owner-managed zone WAF custom rules
 
@@ -86,7 +85,7 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 
 - Proxying is disabled unless `PROXY_ENABLED=true`.
 - VLESS UUID validation is required before any outbound socket is opened.
-- UUID authentication and `ALLOWED_PORTS` restrictions apply to all modes. Domain filtering is optional and disabled by default; when `DOMAIN_FILTER_ENABLED=true`, `ALLOWED_HOSTS` applies root-domain-plus-subdomain matching with a DNS-label boundary.
+- UUID authentication, `ALLOWED_PORTS`, and a non-empty `ALLOWED_HOSTS` exact-match allowlist are mandatory for all modes. A missing or invalid allowlist fails closed; a configured hostname does not authorize its subdomains.
 - Private/local IP literals are rejected by the VLESS parser.
 - No fallback between direct, relay, and SOCKS5 modes.
 - Root, unknown paths, non-GET probes, and non-WebSocket requests to `/ws` return the same generic 404. `/health` is disabled by default (`HEALTH_ENABLED=false`); if explicitly enabled, it returns only `{ "ok": true }`. A disabled or incompletely configured proxy also returns a generic 404.
@@ -113,7 +112,7 @@ Official references:
 1. Keep `workers_dev` enabled. Do not set `workers_dev = false` while this is the only public ingress; doing so removes the current production hostname. Do not disable it until a replacement Custom Domain or Route has been deployed and tested.
 2. Keep `HEALTH_ENABLED=false`. The health endpoint is not required for proxy operation and only adds a public path.
 3. In Cloudflare Dashboard → Workers & Pages → this Worker → Settings → Variables and Secrets, create `PROXY_ENABLED` as a plaintext variable with value `false`. This switch is deliberately not stored in `wrangler.toml`. Confirm the UUID secret is provisioned, the selected outbound mode is configured, and any upstream credentials are stored as Worker Secrets rather than in source files.
-4. Set `DOMAIN_FILTER_ENABLED=true` and a narrow `ALLOWED_HOSTS` list if the intended use case has a known destination set. If you deliberately need a general-purpose client proxy, understand that leaving the filter disabled allows any public destination on the configured destination ports to be requested by anyone who obtains the UUID. UUID secrecy is then the primary access control; this is not equivalent to a Cloudflare WAF allowlist.
+4. Configure a non-empty, narrow `ALLOWED_HOSTS` list containing every exact destination hostname required by the client. The Worker rejects requests when the list is missing, malformed, or does not contain the exact requested hostname. Do not use a general-purpose unrestricted destination policy.
 5. Keep `ALLOWED_PORTS` as narrow as the actual application requires. Do not expand it simply to make a failed connection work.
 6. Do not treat a descriptive `User-Agent` as authentication. If BIC blocks a legitimate client, configure a truthful, descriptive application User-Agent in that client if it supports the header. Do not impersonate a browser or add a fake browser signature. If the client cannot control User-Agent and receives 1010, the reliable fix is to move to a Custom Domain/Route in a zone you control, not to weaken UUID validation.
 7. After settings are reviewed, change the dashboard variable `PROXY_ENABLED` to `true` for the controlled handshake and data-transfer tests below. If any test fails, change it back to `false` while diagnosing.
@@ -185,9 +184,8 @@ Do not enable the proxy or merge this as production-ready until all checks below
 | Proxy disabled | Generic 404; no outbound socket is opened | Worker unit/integration test |
 | Missing UUID / wrong UUID | Connection rejected before outbound socket creation | VLESS parser + integration test |
 | Host not on allowlist | Connection rejected before outbound socket creation | Host allowlist unit/integration test |
-| Domain filter disabled | No hostname allowlist is required when `DOMAIN_FILTER_ENABLED=false` | Security helper + handler test |
-| Domain filter enabled | Missing or malformed `ALLOWED_HOSTS` fails closed | Configuration test |
-| Root-domain matching | `google.com` authorizes `google.com` and `sub.google.com`, but not `evilgoogle.com` or `google.com.evil.net` | Host allowlist unit test |
+| Missing or malformed allowlist | Proxy remains unavailable; no outbound socket is opened | Configuration + handler test |
+| Exact hostname matching | `google.com` authorizes only `google.com`, not `sub.google.com`, `evilgoogle.com`, or `google.com.evil.net` | Host allowlist unit test |
 | Wildcard or malformed allowlist | Configuration rejected closed | Host allowlist unit test |
 | Port not allowed | Connection rejected before outbound socket creation | Integration test |
 | Unapproved relay/SOCKS upstream | Not selectable unless explicitly configured by operator | Configuration review + integration test |
