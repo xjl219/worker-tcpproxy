@@ -1,6 +1,7 @@
 import { connect } from "cloudflare:sockets";
 import { parseVlessRequest } from "./vless";
 import { encodeSocksAddress } from "./socks5";
+import { isAllowedDestinationHost, parseAllowedHosts } from "./security";
 
 interface Env {
   UUID: string;
@@ -268,7 +269,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
       if (!initialized) {
         const parsed = parseVlessRequest(bytes, env.UUID);
         if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
-        if (!allowedHosts(env).has(parsed.hostname.toLowerCase())) throw new Error("Destination host is not allowed");
+        if (!isAllowedDestinationHost(parsed.hostname, allowedHosts(env))) throw new Error("Destination host is not allowed");
 
         const connection = await connectOutbound(env, parsed.hostname, parsed.port);
         upstream = connection.socket;
