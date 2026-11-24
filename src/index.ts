@@ -1,7 +1,7 @@
 import { connect } from "cloudflare:sockets";
 import { parseVlessRequest } from "./vless";
 import { encodeSocksAddress } from "./socks5";
-import { isAllowedDestinationHost, isDomainFilterEnabled, parseAllowedHosts } from "./security";
+import { normalizeDestinationHostname, parseAllowedHosts } from "./security";
 import { CircuitBreakerRegistry } from "./circuit-breaker";
 import { getPublicSurfaceResponse } from "./public-surface";
 
@@ -9,7 +9,6 @@ interface Env {
   UUID: string;
   ALLOWED_PORTS?: string;
   ALLOWED_HOSTS?: string;
-  DOMAIN_FILTER_ENABLED?: string;
   PROXY_ENABLED?: string;
   HEALTH_ENABLED?: string;
   OUTBOUND_MODE?: string;
@@ -273,8 +272,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
     return response("Not found", 404);
   }
   if (env.PROXY_ENABLED !== "true") return response("Not found", 404);
-  const domainFilterEnabled = isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED);
-  if (!env.UUID || !isOutboundConfigured(env) || (domainFilterEnabled && !hasValidAllowedHosts(env))) {
+  if (!env.UUID || !isOutboundConfigured(env) || !hasValidAllowedHosts(env)) {
     return response("Not found", 404);
   }
 
@@ -306,7 +304,8 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
       if (!initialized) {
         const parsed = parseVlessRequest(bytes, env.UUID);
         if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
-        if (domainFilterEnabled && !isAllowedDestinationHost(parsed.hostname, allowedHosts(env))) throw new Error("Destination host is not allowed");
+        const destinationHost = normalizeDestinationHostname(parsed.hostname);
+        if (!allowedHosts(env).has(destinationHost)) throw new Error("Destination host is not allowed");
 
         const connection = await connectOutbound(env, parsed.hostname, parsed.port);
         upstream = connection.socket;
