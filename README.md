@@ -21,7 +21,7 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 
 | Name | Type | Required | Purpose |
 |---|---|---:|---|
-| `UUID` | Secret | Yes | VLESS client UUID; configure with `npx wrangler secret put UUID`, never commit it in `wrangler.toml` |
+| `UUID` | Secret | Yes | VLESS client UUID; the secure deploy command creates it on first deployment and reuses the Cloudflare secret on later deployments |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
 | `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
 | `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |
@@ -33,16 +33,38 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 | `SOCKS5_USERNAME` | Secret | No | Set together with password |
 | `SOCKS5_PASSWORD` | Secret | No | Set together with username |
 
-Set credentials as Cloudflare Worker secrets (run from the project directory):
+### Automatic UUID provisioning
+
+Use the normal deploy command:
 
 ```bash
-npx wrangler secret put UUID
-# Only when using an authenticated SOCKS5 upstream:
-npx wrangler secret put SOCKS5_USERNAME
-npx wrangler secret put SOCKS5_PASSWORD
+npm run deploy
 ```
 
-Do not add a shared/default UUID to `wrangler.toml` or source control. Generate a unique UUID for your deployment and store it as the `UUID` secret. The checked-in `wrangler.toml` intentionally keeps `PROXY_ENABLED=false`.
+The deploy script performs these steps before `wrangler deploy`:
+
+1. If the deployment environment contains `PROXY_UUID` (preferred) or `UUID`, validate it and store it as the Cloudflare `UUID` secret.
+2. Otherwise, query the Cloudflare secret *names*. If a `UUID` secret already exists, keep it unchanged so redeployments do not invalidate existing client profiles.
+3. If no `UUID` secret exists, generate a cryptographically random UUID v4 and send it directly to `wrangler secret put UUID` over stdin.
+4. Deploy only after the secret step succeeds.
+
+The generated UUID is never written to source files, command-line arguments, or deployment output. The script only reports whether it generated, reused, or accepted a supplied secret. If Wrangler cannot return a valid secret listing, deployment stops rather than generating a replacement and unexpectedly rotating credentials.
+
+To intentionally rotate the credential, supply a new UUID for one deployment:
+
+```bash
+# PowerShell
+$env:PROXY_UUID = [guid]::NewGuid().ToString()
+npm run deploy
+Remove-Item Env:PROXY_UUID
+
+# Bash
+PROXY_UUID="$(node -e 'console.log(require("node:crypto").randomUUID())')" npm run deploy
+```
+
+The value is stored as the Cloudflare `UUID` secret. Keep the new client UUID in your password manager; it is not recoverable from the Worker secret listing. If you do not provide an override on later deployments, the existing remote secret is reused.
+
+Only when using an authenticated SOCKS5 upstream, set `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` as Cloudflare secrets separately. Never put any credentials in `wrangler.toml`, source control, URLs, or logs. The checked-in `wrangler.toml` intentionally keeps `PROXY_ENABLED=false`.
 
 
 Example safe initial configuration:
@@ -62,7 +84,7 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 - UUID authentication and `ALLOWED_PORTS` restrictions apply to all modes. Domain filtering is optional and disabled by default; when `DOMAIN_FILTER_ENABLED=true`, `ALLOWED_HOSTS` applies root-domain-plus-subdomain matching with a DNS-label boundary.
 - Private/local IP literals are rejected by the VLESS parser.
 - No fallback between direct, relay, and SOCKS5 modes.
-- HTTP endpoints retain method/path checks and security response headers.
+- Unauthenticated root and unknown paths return a generic 404; `/health` returns only `{ "ok": true }` and does not disclose mode or configuration. A disabled or incompletely configured proxy also returns a generic 404.\n- WebSocket policy failures use a generic close reason; detailed auth, destination, and upstream errors are not returned to unauthenticated clients.\n- HTTP endpoints retain method/path checks and security response headers.
 - WebSocket messages and buffered output remain bounded.
 
 ### Mandatory Cloudflare-side controls
@@ -71,7 +93,7 @@ The Worker code cannot provide a reliable account-wide rate or concurrent-connec
 
 1. Add a WAF custom rule for the proxy hostname: allow only the intended `/ws` path and the minimal public health/root paths you actually need; block requests to all other paths. Keep the Worker's own generic 404 checks as a second layer.
 2. Add a rate-limiting rule scoped to `/ws`, keyed by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Start in block/managed challenge mode supported for WebSocket handshakes by the zone; verify the rule actually applies to Upgrade requests before relying on it.
-3. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.
+3. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.\n4. Consider disabling the public `/health` route at the Cloudflare edge if external monitoring is not needed; if retained, it exposes only a generic liveness bit.\n5. Do not assume a hidden path or generic 404 prevents discovery. Treat the UUID as the actual client authentication secret.
 4. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
 5. Keep `PROXY_ENABLED=false` until these rules have been verified.
 
@@ -119,7 +141,7 @@ A passing TypeScript build or unit-test suite is not a substitute for the zone-l
 
 1. Deploy under the separate Worker name in `wrangler.toml`; do not overwrite an existing service.
 2. Set `OUTBOUND_MODE=direct`, configure `UUID` and a narrow `ALLOWED_HOSTS`, and keep `PROXY_ENABLED=false`.
-3. Confirm `/health` reports the selected mode and configuration flags. It does not test outbound connectivity.
+3. Confirm `/health` returns only `{ "ok": true }`. It intentionally does not report the selected mode or configuration and does not test outbound connectivity.
 4. Enable only for a controlled test and verify a permitted destination.
 5. Record the observed egress IP and independently check its geolocation; a successful request does not prove a US exit.
 6. Test sustained bidirectional traffic, reconnects, and error handling before any broader use.
