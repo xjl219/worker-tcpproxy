@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVlessRequest } from "../src/vless";
-import { encodeSocksAddress } from "../src/socks5";
+import { parseV1Request, encodeS5Address } from "../src/v1-s5";
 import { isAllowedDestinationHost, normalizeDestinationHostname, parseAllowedHosts } from "../src/security";
 
 const UUID = "00000000-0000-4000-8000-000000000001";
@@ -15,65 +14,65 @@ function makeRequest(host: string, port = 443, addressType = 2): Uint8Array {
   return new Uint8Array([0, ...uuid, 0, 1, (port >> 8) & 0xff, port & 0xff, 2, domain.length, ...domain]);
 }
 
-describe("VLESS request parser", () => {
+describe("V1 request parser", () => {
   it("parses a domain TCP request", () => {
-    const result = parseVlessRequest(makeRequest("example.com"), UUID);
+    const result = parseV1Request(makeRequest("example.com"), UUID);
     expect(result.hostname).toBe("example.com");
     expect(result.port).toBe(443);
   });
 
   it("rejects an incorrect UUID", () => {
-    expect(() => parseVlessRequest(makeRequest("example.com"), "10000000-0000-4000-8000-000000000001"))
+    expect(() => parseV1Request(makeRequest("example.com"), "10000000-0000-4000-8000-000000000001"))
       .toThrow("Invalid VLESS UUID");
   });
 
   it.each(["", "not-a-uuid", "00000000-0000-4000-8000-00000000000z"])(
     "rejects an absent or malformed configured UUID (%s)",
     (configuredUuid) => {
-      expect(() => parseVlessRequest(makeRequest("example.com"), configuredUuid))
+      expect(() => parseV1Request(makeRequest("example.com"), configuredUuid))
         .toThrow("UUID must be a valid");
     },
   );
 
   it.each(["10.0.0.1", "127.0.0.1", "169.254.1.1", "192.168.1.1", "100.64.0.1", "198.18.0.1", "203.0.113.1"])(
     "rejects non-public IPv4 destination %s", (host) => {
-      expect(() => parseVlessRequest(makeRequest(host, 443, 1), UUID)).toThrow("Private or local");
+      expect(() => parseV1Request(makeRequest(host, 443, 1), UUID)).toThrow("Private or local");
     },
   );
 
   it.each(["2130706433", "127.1", "0177.0.0.1", "999.999.999.999", "localhost", "host..example.com"])(
     "rejects non-canonical or non-public numeric/domain destination %s", (host) => {
-      expect(() => parseVlessRequest(makeRequest(host), UUID)).toThrow();
+      expect(() => parseV1Request(makeRequest(host), UUID)).toThrow();
     },
   );
 
   it("rejects malformed UTF-8 in a domain destination", () => {
     const data = makeRequest("example.com");
     data[23] = 0xff;
-    expect(() => parseVlessRequest(data, UUID)).toThrow();
+    expect(() => parseV1Request(data, UUID)).toThrow();
   });
 
   it("rejects UDP command", () => {
     const data = makeRequest("example.com");
     data[18] = 2;
-    expect(() => parseVlessRequest(data, UUID)).toThrow("Only VLESS TCP");
+    expect(() => parseV1Request(data, UUID)).toThrow("Only VLESS TCP");
   });
 });
 
 
-describe("SOCKS5 destination address encoding", () => {
+describe("S5 destination address encoding", () => {
   it("encodes IPv4 as ATYP 1 with four address octets", () => {
-    expect(Array.from(encodeSocksAddress("8.8.4.4"))).toEqual([1, 8, 8, 4, 4]);
+    expect(Array.from(encodeS5Address("8.8.4.4"))).toEqual([1, 8, 8, 4, 4]);
   });
 
   it("encodes domains as ATYP 3", () => {
-    expect(Array.from(encodeSocksAddress("example.com"))).toEqual([
+    expect(Array.from(encodeS5Address("example.com"))).toEqual([
       3, 11, ...new TextEncoder().encode("example.com"),
     ]);
   });
 
   it("encodes compressed IPv6 as ATYP 4 with sixteen address bytes", () => {
-    const encoded = encodeSocksAddress("2001:db8::1");
+    const encoded = encodeS5Address("2001:db8::1");
     expect(encoded[0]).toBe(4);
     expect(encoded).toHaveLength(17);
     expect(Array.from(encoded.slice(1))).toEqual([
