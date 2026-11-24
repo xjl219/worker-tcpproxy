@@ -2,6 +2,7 @@ import { connect } from "cloudflare:sockets";
 import { parseVlessRequest } from "./vless";
 import { encodeSocksAddress } from "./socks5";
 import { isAllowedDestinationHost, isDomainFilterEnabled, parseAllowedHosts } from "./security";
+import { CircuitBreakerRegistry } from "./circuit-breaker";
 
 interface Env {
   UUID: string;
@@ -215,15 +216,42 @@ function stableIndex(value: string, count: number): number {
   return (hash >>> 0) % count;
 }
 
+const relayCircuitBreakers = new CircuitBreakerRegistry({
+  failureThreshold: 3,
+  resetTimeoutMs: 30_000,
+});
+
 async function connectViaRelay(env: Env, destinationHost: string, destinationPort: number): Promise<UpstreamConnection> {
   if (destinationPort !== 443) throw new Error("SNI relay mode supports destination port 443 only");
   const candidates = relayCandidates(env);
   if (!candidates.length) throw new Error("RELAY_ENDPOINTS is not configured");
-  // Stable per destination: avoids changing relay egress on every reconnect.
-  const endpoint = candidates[stableIndex(destinationHost, candidates.length)];
-  const socket = connect(endpoint, { allowHalfOpen: true });
-  await socket.opened;
-  return { socket, writer: socket.writable.getWriter(), reader: new SocketReader(socket.readable) };
+
+  // Preserve deterministic preference, then fail over only among explicitly configured relays.
+  const start = stableIndex(destinationHost, candidates.length);
+  let lastError: unknown;
+  let attempted = 0;
+  for (let offset = 0; offset < candidates.length; offset++) {
+    const endpoint = candidates[(start + offset) % candidates.length];
+    const key = endpoint.hostname.toLowerCase() + ":" + endpoint.port;
+    if (!relayCircuitBreakers.tryAcquire(key)) continue;
+    attempted += 1;
+
+    let socket: ReturnType<typeof connect> | undefined;
+    try {
+      socket = connect(endpoint, { allowHalfOpen: true });
+      await socket.opened;
+      relayCircuitBreakers.recordSuccess(key);
+      return { socket, writer: socket.writable.getWriter(), reader: new SocketReader(socket.readable) };
+    } catch (error) {
+      lastError = error;
+      relayCircuitBreakers.recordFailure(key);
+      try { await socket?.close(); } catch { /* socket may not have opened */ }
+    }
+  }
+
+  if (attempted === 0) throw new Error("All configured relay circuits are open");
+  throw new Error("All configured relay endpoints failed: " +
+    (lastError instanceof Error ? lastError.message : "upstream connection failed"));
 }
 
 async function connectOutbound(env: Env, host: string, port: number): Promise<UpstreamConnection> {
