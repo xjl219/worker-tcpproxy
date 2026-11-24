@@ -216,6 +216,23 @@ function stableIndex(value: string, count: number): number {
   return (hash >>> 0) % count;
 }
 
+function isOutboundConfigured(env: Env): boolean {
+  try {
+    const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
+    if (mode === "direct") return true;
+    if (mode === "relay") return relayCandidates(env).length > 0;
+    if (mode === "socks5") {
+      if (!env.SOCKS5_HOST?.trim()) return false;
+      const port = Number(env.SOCKS5_PORT || "1080");
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
+      return (Boolean(env.SOCKS5_USERNAME) === Boolean(env.SOCKS5_PASSWORD));
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 const relayCircuitBreakers = new CircuitBreakerRegistry({
   failureThreshold: 3,
   resetTimeoutMs: 30_000,
@@ -268,12 +285,8 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
     return response("Expected WebSocket upgrade", 426);
   }
   if (env.PROXY_ENABLED !== "true") return response("Proxy is disabled", 503);
-  const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
-  const modeConfigured = mode === "direct" ||
-    (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
-    (mode === "relay" && relayCandidates(env).length > 0);
   const domainFilterEnabled = isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED);
-  if (!env.UUID || !modeConfigured || (domainFilterEnabled && !hasValidAllowedHosts(env))) {
+  if (!env.UUID || !isOutboundConfigured(env) || (domainFilterEnabled && !hasValidAllowedHosts(env))) {
     return response("Proxy is not configured", 503);
   }
 
@@ -341,11 +354,8 @@ export default {
 
     if (url.pathname === "/health") {
       const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
-      const configured = mode === "direct" ||
-        (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
-        (mode === "relay" && relayCandidates(env).length > 0);
       return Response.json(
-        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: configured, domainFilterEnabled: isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED), allowedHostsConfigured: hasValidAllowedHosts(env) },
+        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: isOutboundConfigured(env), domainFilterEnabled: isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED), allowedHostsConfigured: hasValidAllowedHosts(env) },
         { headers: SECURITY_HEADERS },
       );
     }
