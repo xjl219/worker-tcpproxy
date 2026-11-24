@@ -24,7 +24,8 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 | `UUID` | Secret | Yes | VLESS client UUID |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
 | `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
-| `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |\n| `ALLOWED_HOSTS` | Variable | When filtering is enabled | Comma-separated DNS root domains; each entry allows that domain and its subdomains. No wildcard, URL, path, port, or IP-literal entries. |
+| `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |
+| `ALLOWED_HOSTS` | Variable | When filtering is enabled | Comma-separated DNS root domains; each entry allows that domain and its subdomains. No wildcard, URL, path, port, or IP-literal entries. |
 | `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
 | `RELAY_ENDPOINTS` | Variable | Relay only | Comma-separated `host:port` relay endpoints |
 | `SOCKS5_HOST` | Variable | SOCKS5 only | Authorized SOCKS5 server hostname/IP |
