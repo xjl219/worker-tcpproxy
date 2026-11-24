@@ -65,14 +65,18 @@ PROXY_UUID="$(node -e 'console.log(require("node:crypto").randomUUID())')" npm r
 
 The value is stored as the Cloudflare `UUID` secret. For generated credentials, retrieve the client UUID from `.wrangler/proxy-uuid.txt` and keep it in your password manager. Cloudflare secret listings expose names, not secret values. If you do not provide an override on later deployments, the existing remote secret is reused.
 
-Only when using an authenticated SOCKS5 upstream, set `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` as Cloudflare secrets separately. Never put any credentials in `wrangler.toml`, source control, URLs, or logs. The checked-in `wrangler.toml` intentionally keeps `PROXY_ENABLED=false`.
+Only when using an authenticated SOCKS5 upstream, set `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` as Cloudflare secrets separately. Never put any credentials in `wrangler.toml`, source control, URLs, or logs.
+
+`PROXY_ENABLED` is intentionally not declared in `wrangler.toml`: set it in Cloudflare Dashboard → Workers & Pages → this Worker → Settings → Variables and Secrets. Set it to `false` for initial deployment and only change it to `true` after controlled acceptance. The deploy script uses Wrangler `--keep-vars` so dashboard-managed variables are retained on subsequent deployments. Do not add this switch back to the repository configuration.
 
 
 Example safe initial configuration:
 
 - `OUTBOUND_MODE=direct`
-- `PROXY_ENABLED=false` until access controls and destinations have been reviewed
+- In Cloudflare Dashboard, set `PROXY_ENABLED=false` until configuration and controlled tests are complete
 - `DOMAIN_FILTER_ENABLED=false` (default); `ALLOWED_HOSTS` may be left unset while filtering is disabled
+- Do not create or enable a Cloudflare Access application for the initial workers.dev deployment
+- Do not configure WAF rules for this initial workers.dev deployment; workers.dev is Cloudflare-managed and does not provide owner-managed zone WAF custom rules
 
 For relay mode, configure only relay endpoints that you own or are explicitly authorized to use. Each entry uses `host:port`; the current v1 parser expects a hostname or IPv4-style host and does not support bracketed IPv6 endpoints. The same destination hostname determines the preferred configured relay within an isolate. If that relay fails, the Worker tries the other explicitly configured relay endpoints. Each endpoint has an isolate-local circuit breaker: three consecutive connection failures open the circuit for 30 seconds; after the timeout, one request may perform a half-open probe. A successful probe closes the circuit. This state is not shared across Worker isolates and is not a global health/quota coordinator. There is no automatic public feed ingestion.
 
@@ -108,15 +112,19 @@ Official references:
 
 1. Keep `workers_dev` enabled. Do not set `workers_dev = false` while this is the only public ingress; doing so removes the current production hostname. Do not disable it until a replacement Custom Domain or Route has been deployed and tested.
 2. Keep `HEALTH_ENABLED=false`. The health endpoint is not required for proxy operation and only adds a public path.
-3. Keep `PROXY_ENABLED=false` for the first deployment and configuration pass. Confirm the UUID secret is provisioned, the selected outbound mode is configured, and any upstream credentials are stored as Worker Secrets rather than in `wrangler.toml`.
+3. In Cloudflare Dashboard → Workers & Pages → this Worker → Settings → Variables and Secrets, create `PROXY_ENABLED` as a plaintext variable with value `false`. This switch is deliberately not stored in `wrangler.toml`. Confirm the UUID secret is provisioned, the selected outbound mode is configured, and any upstream credentials are stored as Worker Secrets rather than in source files.
 4. Set `DOMAIN_FILTER_ENABLED=true` and a narrow `ALLOWED_HOSTS` list if the intended use case has a known destination set. If you deliberately need a general-purpose client proxy, understand that leaving the filter disabled allows any public destination on the configured destination ports to be requested by anyone who obtains the UUID. UUID secrecy is then the primary access control; this is not equivalent to a Cloudflare WAF allowlist.
 5. Keep `ALLOWED_PORTS` as narrow as the actual application requires. Do not expand it simply to make a failed connection work.
 6. Do not treat a descriptive `User-Agent` as authentication. If BIC blocks a legitimate client, configure a truthful, descriptive application User-Agent in that client if it supports the header. Do not impersonate a browser or add a fake browser signature. If the client cannot control User-Agent and receives 1010, the reliable fix is to move to a Custom Domain/Route in a zone you control, not to weaken UUID validation.
 7. After settings are reviewed, set `PROXY_ENABLED=true` and run the controlled handshake and data-transfer tests below. If any test fails, turn it back to `false` while diagnosing.
 
-#### Optional Access hardening on workers.dev
+#### Access and WAF baseline
 
-Only perform this if the exact client supports custom WebSocket handshake headers:
+For this deployment, Cloudflare Access is not configured and remains off. Do not create an Access application or Service Auth policy. WAF rules are also not configured; the managed `workers.dev` hostname does not provide owner-managed zone-level WAF custom rules. These are platform/dashboard decisions, not Worker source-code settings. Revisit edge protections only if the service moves to a Custom Domain in a zone you control.
+
+The following Access hardening is intentionally not part of the default deployment and must not be enabled for the initial rollout:
+
+Only perform this later evaluation if the exact client supports custom WebSocket handshake headers:
 
 1. In Zero Trust, create a Service Token dedicated to this proxy client. Do not reuse a token shared with unrelated applications.
 2. In Zero Trust > Access > Applications, create a Self-hosted application for the exact hostname `<worker-name>.<account-subdomain>.workers.dev`. Do not select the Worker-level "Protect this Worker" control.
@@ -132,11 +140,11 @@ Access adds a pre-Worker identity gate, but it is not a substitute for applicati
 1. Run `npm ci`, `npm run check`, and `npx wrangler deploy --dry-run` locally or in CI.
 2. Verify the Cloudflare account and Worker name selected by Wrangler. This repository's config names the Worker `worker-tcpproxy-pluggable-v1`; do not deploy over a different production Worker by accident.
 3. Run `npm run deploy`. The script provisions/reuses the UUID secret without printing it. Preserve `.wrangler/proxy-uuid.txt` securely if this is the first generated UUID; never commit or share it.
-4. In the Worker settings, verify `PROXY_ENABLED=false`, `HEALTH_ENABLED=false`, the intended `OUTBOUND_MODE`, and the relevant upstream variables/secrets.
+4. In Cloudflare Dashboard, set `PROXY_ENABLED=false`; verify `HEALTH_ENABLED=false`, the intended `OUTBOUND_MODE`, and the relevant upstream variables/secrets. Confirm no Access application/policy has been created for this hostname and no WAF rules have been configured.
 5. Test the public hostname's BIC behavior with the actual VLESS client. An HTTP 1010 response is an edge rejection before Worker execution; it is not a VLESS UUID or Worker routing error.
 6. Test a deliberately invalid UUID and verify that no outbound connection is opened. Then test a valid UUID against an explicitly authorized destination and verify bidirectional traffic, reconnect behavior, and sustained transfer.
 7. Verify the observed egress IP and country independently. A successful WebSocket connection does not prove a US exit location.
-8. Only after the controlled tests pass, set `PROXY_ENABLED=true`. Keep a rollback path: set it back to `false` or redeploy the previous known-good version if the service behaves unexpectedly.
+8. Only after the controlled tests pass, change the dashboard variable `PROXY_ENABLED` to `true`. Keep a rollback path: set it back to `false` if the service behaves unexpectedly.
 
 #### What workers.dev does not provide for this service
 
