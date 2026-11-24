@@ -1,6 +1,5 @@
 import { connect } from "cloudflare:sockets";
-import { parseVlessRequest } from "./vless";
-import { encodeSocksAddress } from "./socks5";
+import { parseV1Request, encodeS5Address } from "./v1-s5";
 import { normalizeDestinationHostname, parseAllowedHosts } from "./security";
 import { CircuitBreakerRegistry } from "./circuit-breaker";
 import { getPublicSurfaceResponse } from "./public-surface";
@@ -150,7 +149,7 @@ async function connectViaSocks5(
       throw new Error("SOCKS5 proxy selected an unsupported authentication method");
     }
 
-    const address = encodeSocksAddress(destinationHost);
+    const address = encodeS5Address(destinationHost);
     await writer.write(new Uint8Array([
       5, 1, 0, ...address, (destinationPort >> 8) & 255, destinationPort & 255,
     ]));
@@ -302,7 +301,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
       if (bytes.byteLength > MAX_MESSAGE_BYTES) throw new Error("WebSocket message exceeds 8 MiB limit");
 
       if (!initialized) {
-        const parsed = parseVlessRequest(bytes, env.UUID);
+        const parsed = parseV1Request(bytes, env.UUID);
         if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
         const destinationHost = normalizeDestinationHostname(parsed.hostname);
         if (!allowedHosts(env).has(destinationHost)) throw new Error("Destination host is not allowed");
