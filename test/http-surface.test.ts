@@ -9,7 +9,7 @@ const baseEnv = {
 
 describe("public HTTP surface", () => {
   it("hides health by default", async () => {
-    const response = await worker.fetch(new Request("https://worker.example/health"), baseEnv, {} as ExecutionContext);
+    const response = await worker.fetch(new Request("https://worker.example/health"), baseEnv);
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("Not found");
   });
@@ -17,8 +17,7 @@ describe("public HTTP surface", () => {
   it("exposes only a generic liveness response when health is explicitly enabled", async () => {
     const response = await worker.fetch(
       new Request("https://worker.example/health"),
-      { ...baseEnv, HEALTH_ENABLED: "true" },
-      {} as ExecutionContext,
+      { ...baseEnv, HEALTH_ENABLED: "true" }
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
