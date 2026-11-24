@@ -3,6 +3,7 @@ import { parseVlessRequest } from "./vless";
 import { encodeSocksAddress } from "./socks5";
 import { isAllowedDestinationHost, isDomainFilterEnabled, parseAllowedHosts } from "./security";
 import { CircuitBreakerRegistry } from "./circuit-breaker";
+import { getPublicSurfaceResponse } from "./public-surface";
 
 interface Env {
   UUID: string;
@@ -35,20 +36,6 @@ function response(body: BodyInit | null, status: number, headers?: HeadersInit):
   return new Response(body, { status, headers: merged });
 }
 
-function isSensitivePath(pathname: string): boolean {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname).toLowerCase();
-  } catch {
-    return true;
-  }
-  const normalized = decoded.replace(/\\/g, "/");
-  return normalized.split("/").some((part) =>
-    part === ".env" || part === ".git" || part === ".vscode" ||
-    part === ".svn" || part === ".hg" || part === "actuator" ||
-    part === "wp-admin" || part === "phpmyadmin"
-  );
-}
 
 function toBytes(data: unknown): Uint8Array {
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
@@ -349,17 +336,8 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    if (isSensitivePath(url.pathname)) return response("Not found", 404);
-    if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
-
-    if (url.pathname === "/health") {
-      // Health is opt-in. Keep the default public surface to the authenticated proxy endpoint only.
-      if (env.HEALTH_ENABLED !== "true") return response("Not found", 404);
-      return Response.json({ ok: true }, { headers: SECURITY_HEADERS });
-    }
-    if (url.pathname === "/") return response("Not found", 404);
-    if (url.pathname === "/ws") return handleWebSocket(request, env);
-    return response("Not found", 404);
+    const publicSurfaceResponse = getPublicSurfaceResponse(request, env.HEALTH_ENABLED);
+    if (publicSurfaceResponse) return publicSurfaceResponse;
+    return handleWebSocket(request, env);
   },
 } satisfies ExportedHandler<Env>;
