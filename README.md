@@ -85,18 +85,22 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 - UUID authentication and `ALLOWED_PORTS` restrictions apply to all modes. Domain filtering is optional and disabled by default; when `DOMAIN_FILTER_ENABLED=true`, `ALLOWED_HOSTS` applies root-domain-plus-subdomain matching with a DNS-label boundary.
 - Private/local IP literals are rejected by the VLESS parser.
 - No fallback between direct, relay, and SOCKS5 modes.
-- Unauthenticated root and unknown paths return a generic 404; `/health` returns only `{ "ok": true }` and does not disclose mode or configuration. A disabled or incompletely configured proxy also returns a generic 404.\n- WebSocket policy failures use a generic close reason; detailed auth, destination, and upstream errors are not returned to unauthenticated clients.\n- HTTP endpoints retain method/path checks and security response headers.
+- Unauthenticated root and unknown paths return a generic 404; `/health` returns only `{ "ok": true }` and does not disclose mode or configuration. A disabled or incompletely configured proxy also returns a generic 404.
+- WebSocket policy failures use a generic close reason; detailed auth, destination, and upstream errors are not returned to clients.
+- HTTP endpoints retain method/path checks and security response headers.
 - WebSocket messages and buffered output remain bounded.
 
 ### Mandatory Cloudflare-side controls
 
 The Worker code cannot provide a reliable account-wide rate or concurrent-connection quota across independent isolates. Before enabling production traffic, configure controls on the Cloudflare zone/hostname:
 
-1. Add a WAF custom rule for the proxy hostname: allow only the intended `/ws` path and the minimal public health/root paths you actually need; block requests to all other paths. Keep the Worker's own generic 404 checks as a second layer.
-2. Add a rate-limiting rule scoped to `/ws`, keyed by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Start in block/managed challenge mode supported for WebSocket handshakes by the zone; verify the rule actually applies to Upgrade requests before relying on it.
-3. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.\n4. Consider disabling the public `/health` route at the Cloudflare edge if external monitoring is not needed; if retained, it exposes only a generic liveness bit.\n5. Do not assume a hidden path or generic 404 prevents discovery. Treat the UUID as the actual client authentication secret.
-4. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
-5. Keep `PROXY_ENABLED=false` until these rules have been verified.
+1. Add a WAF custom rule for the proxy hostname: allow only the intended `/ws` path and `/health` if external monitoring is needed; block requests to all other paths. Keep the Worker's own generic 404 checks as a second layer.
+2. Add a rate-limiting rule scoped to `/ws`, keyed by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Verify the rule actually applies to WebSocket Upgrade requests before relying on it.
+3. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.
+4. Consider disabling the public `/health` route at the Cloudflare edge if external monitoring is not needed; if retained, it exposes only a generic liveness bit.
+5. Do not assume a hidden path or generic 404 prevents discovery. Treat the UUID as the actual client authentication secret.
+6. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
+7. Keep `PROXY_ENABLED=false` until these rules have been verified.
 
 Do not interpret a request-rate rule as a concurrent-connection or bandwidth quota. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that is a separate implementation gate and is not claimed by the current PR.
 
