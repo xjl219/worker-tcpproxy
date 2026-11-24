@@ -9,8 +9,8 @@ region = "gcp:us-central1"
 enabled = true
 
 # Non-secret runtime configuration.
+# PROXY_ENABLED is intentionally managed in the Cloudflare dashboard.
 [vars]
-PROXY_ENABLED = "false"
 HEALTH_ENABLED = "false"
 OUTBOUND_MODE = "direct"
 DOMAIN_FILTER_ENABLED = "false"
