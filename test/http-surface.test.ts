@@ -32,7 +32,7 @@ describe("public HTTP surface", () => {
   });
 
   it("does not reveal the WebSocket route to ordinary HTTP probes", async () => {
-    const response = await worker.fetch(new Request("https://worker.example/ws"), baseEnv, {} as ExecutionContext);
+    const response = await worker.fetch(new Request("https://worker.example/ws"), baseEnv);
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("Not found");
   });
