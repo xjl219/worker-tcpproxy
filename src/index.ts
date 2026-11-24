@@ -1,12 +1,13 @@
 import { connect } from "cloudflare:sockets";
 import { parseVlessRequest } from "./vless";
 import { encodeSocksAddress } from "./socks5";
-import { isAllowedDestinationHost, parseAllowedHosts } from "./security";
+import { isAllowedDestinationHost, isDomainFilterEnabled, parseAllowedHosts } from "./security";
 
 interface Env {
   UUID: string;
   ALLOWED_PORTS?: string;
   ALLOWED_HOSTS?: string;
+  DOMAIN_FILTER_ENABLED?: string;
   PROXY_ENABLED?: string;
   OUTBOUND_MODE?: string;
   RELAY_ENDPOINTS?: string;
@@ -54,9 +55,15 @@ function toBytes(data: unknown): Uint8Array {
 }
 
 function allowedHosts(env: Env): Set<string> {
-  const raw = env.ALLOWED_HOSTS?.trim();
-  if (!raw) return new Set();
-  return new Set(raw.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
+  return parseAllowedHosts(env.ALLOWED_HOSTS);
+}
+
+function hasValidAllowedHosts(env: Env): boolean {
+  try {
+    return allowedHosts(env).size > 0;
+  } catch {
+    return false;
+  }
 }
 
 function allowedPorts(env: Env): Set<number> {
@@ -237,7 +244,8 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   const modeConfigured = mode === "direct" ||
     (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
     (mode === "relay" && relayCandidates(env).length > 0);
-  if (!env.UUID || !modeConfigured || !hasValidAllowedHosts(env)) {
+  const domainFilterEnabled = isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED);
+  if (!env.UUID || !modeConfigured || (domainFilterEnabled && !hasValidAllowedHosts(env))) {
     return response("Proxy is not configured", 503);
   }
 
@@ -269,7 +277,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
       if (!initialized) {
         const parsed = parseVlessRequest(bytes, env.UUID);
         if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
-        if (!isAllowedDestinationHost(parsed.hostname, allowedHosts(env))) throw new Error("Destination host is not allowed");
+        if (domainFilterEnabled && !isAllowedDestinationHost(parsed.hostname, allowedHosts(env))) throw new Error("Destination host is not allowed");
 
         const connection = await connectOutbound(env, parsed.hostname, parsed.port);
         upstream = connection.socket;
@@ -309,7 +317,7 @@ export default {
         (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
         (mode === "relay" && relayCandidates(env).length > 0);
       return Response.json(
-        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: configured, allowedHostsConfigured: hasValidAllowedHosts(env) },
+        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: configured, domainFilterEnabled: isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED), allowedHostsConfigured: hasValidAllowedHosts(env) },
         { headers: SECURITY_HEADERS },
       );
     }
