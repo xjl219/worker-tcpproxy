@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseSecretNames, resolveDeploymentUuid, validateUuid } from "../scripts/deploy.mjs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseSecretNames, resolveDeploymentUuid, saveGeneratedUuid, validateUuid } from "../scripts/deploy.mjs";
 
 const UUID = "00000000-0000-4000-8000-000000000001";
 
@@ -28,6 +31,18 @@ describe("secure deployment UUID handling", () => {
   it("fails closed on malformed Wrangler output rather than rotating credentials", () => {
     expect(() => parseSecretNames("not json")).toThrow("refusing to rotate");
     expect(() => parseSecretNames('{"unexpected":[]}')).toThrow("refusing to rotate");
+  });
+
+  it("persists a newly generated UUID in the ignored local credential file", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worker-tcpproxy-test-"));
+    try {
+      saveGeneratedUuid(UUID, directory);
+      const credentialPath = join(directory, ".wrangler", "proxy-uuid.txt");
+      expect(readFileSync(credentialPath, "utf8")).toBe(UUID + "\\n");
+      expect(statSync(credentialPath).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("rejects malformed configured UUID values", () => {
