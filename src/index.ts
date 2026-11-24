@@ -4,6 +4,8 @@ import { parseVlessRequest } from "./vless";
 interface Env {
   UUID: string;
   ALLOWED_PORTS?: string;
+  PROXY_ENABLED?: string;
+  ALLOWED_HOSTS?: string;
 }
 
 const DEFAULT_ALLOWED_PORTS = [80, 443, 8080, 8443, 2053, 2083, 2087, 2096];
@@ -53,13 +55,22 @@ function allowedPorts(env: Env): Set<number> {
   return new Set(ports);
 }
 
+function allowedHosts(env: Env): Set<string> {
+  const raw = env.ALLOWED_HOSTS?.trim();
+  if (!raw) return new Set();
+  return new Set(raw.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
+}
+
 async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return response("Expected WebSocket upgrade", 426);
   }
-  if (!env.UUID) return response("Service unavailable", 503);
+  if (env.PROXY_ENABLED !== "true") return response("Proxy is disabled", 503);
+  if (!env.UUID || allowedHosts(env).size === 0) return response("Proxy is not configured", 503);
 
+  const hostAllowlist = allowedHosts(env);
+  const portAllowlist = allowedPorts(env);
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
@@ -108,7 +119,9 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
 
       if (!initialized) {
         const parsed = parseVlessRequest(bytes, env.UUID);
-        if (!allowedPorts(env).has(parsed.port)) throw new Error("Destination port is not allowed");
+        if (!portAllowlist.has(parsed.port)) throw new Error("Destination port is not allowed");
+        const targetHost = parsed.hostname.toLowerCase().replace(/^\\[|\\]$/g, "");
+        if (!hostAllowlist.has(targetHost)) throw new Error("Destination host is not allowed");
 
         upstream = connect({ hostname: parsed.hostname, port: parsed.port }, { allowHalfOpen: true });
         await upstream.opened;
@@ -142,7 +155,7 @@ export default {
 
     if (url.pathname === "/health") {
       return Response.json(
-        { ok: true, service: "edge-service" },
+        { ok: true, service: "edge-service", proxyEnabled: env.PROXY_ENABLED === "true" },
         { headers: SECURITY_HEADERS },
       );
     }
