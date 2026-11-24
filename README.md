@@ -41,14 +41,15 @@ Use the normal deploy command:
 npm run deploy
 ```
 
-The deploy script performs these steps before `wrangler deploy`:
+The deploy script performs these steps before deployment:
 
-1. If the deployment environment contains `PROXY_UUID` (preferred) or `UUID`, validate it and store it as the Cloudflare `UUID` secret.
-2. Otherwise, query the Cloudflare secret *names* with `wrangler secret list --format json`. If a `UUID` secret already exists, keep it unchanged so redeployments do not invalidate existing client profiles.
-3. If no `UUID` secret exists, generate a cryptographically random UUID v4 and send it directly to `wrangler secret put UUID` over stdin.
-4. Deploy only after the secret step succeeds.
+1. If the deployment environment contains `PROXY_UUID` (preferred) or `UUID`, validate it and inject it as the Cloudflare `UUID` secret for this deployment.
+2. Otherwise, query Cloudflare with `wrangler secret list --format json`. If a `UUID` secret already exists, keep it unchanged so redeployments do not invalidate existing client profiles.
+3. On the first deployment, when the Worker does not exist yet, generate a cryptographically random UUID v4. If a previous generated local copy exists, reuse it.
+4. Include a new or supplied UUID in the same Worker deployment through Wrangler's `--secrets-file` option. The temporary secrets file is created outside the repository with restrictive permissions and removed after deployment.
+5. Save an automatically generated UUID to `.wrangler/proxy-uuid.txt` (ignored by Git) so the operator can retrieve the client credential. Do not share or commit this file.
 
-The generated UUID is never written to source files, command-line arguments, or deployment output. The script only reports whether it generated, reused, or accepted a supplied secret. If Wrangler cannot return a valid secret listing, deployment stops rather than generating a replacement and unexpectedly rotating credentials. Existing Cloudflare secrets are retained by normal deployments when no replacement is supplied.
+The UUID is never printed in deployment logs, placed in command-line arguments, or written into tracked source files. The script only reports whether it generated, reused, or accepted a supplied secret. If Cloudflare cannot return a valid secret listing for a reason other than a missing Worker, deployment stops rather than risking an accidental credential rotation. Existing Cloudflare secrets are retained by normal deployments when no replacement is supplied.
 
 To intentionally rotate the credential, supply a new UUID for one deployment:
 
@@ -62,7 +63,7 @@ Remove-Item Env:PROXY_UUID
 PROXY_UUID="$(node -e 'console.log(require("node:crypto").randomUUID())')" npm run deploy
 ```
 
-The value is stored as the Cloudflare `UUID` secret. Keep the new client UUID in your password manager; it is not recoverable from the Worker secret listing. If you do not provide an override on later deployments, the existing remote secret is reused.
+The value is stored as the Cloudflare `UUID` secret. For generated credentials, retrieve the client UUID from `.wrangler/proxy-uuid.txt` and keep it in your password manager. Cloudflare secret listings expose names, not secret values. If you do not provide an override on later deployments, the existing remote secret is reused.
 
 Only when using an authenticated SOCKS5 upstream, set `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` as Cloudflare secrets separately. Never put any credentials in `wrangler.toml`, source control, URLs, or logs. The checked-in `wrangler.toml` intentionally keeps `PROXY_ENABLED=false`.
 
