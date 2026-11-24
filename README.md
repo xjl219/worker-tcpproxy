@@ -51,7 +51,7 @@ Example safe initial configuration:
 - `PROXY_ENABLED=false` until access controls and destinations have been reviewed
 - `DOMAIN_FILTER_ENABLED=false` (default); `ALLOWED_HOSTS` may be left unset while filtering is disabled
 
-For relay mode, configure only relay endpoints that you own or are explicitly authorized to use. Each entry uses `host:port`; the current v1 parser expects a hostname or IPv4-style host and does not support bracketed IPv6 endpoints. The same destination hostname always selects the same configured relay within an isolate. There is no health-based failover or automatic public feed ingestion in v1.
+For relay mode, configure only relay endpoints that you own or are explicitly authorized to use. Each entry uses `host:port`; the current v1 parser expects a hostname or IPv4-style host and does not support bracketed IPv6 endpoints. The same destination hostname determines the preferred configured relay within an isolate. If that relay fails, the Worker tries the other explicitly configured relay endpoints. Each endpoint has an isolate-local circuit breaker: three consecutive connection failures open the circuit for 30 seconds; after the timeout, one request may perform a half-open probe. A successful probe closes the circuit. This state is not shared across Worker isolates and is not a global health/quota coordinator. There is no automatic public feed ingestion.
 
 Relay mode forwards the original client TLS bytes; it does not create a new TLS session to the relay. The relay must implement compatible SNI-based forwarding. It is restricted to destination port 443, but this does not itself prove the client stream contains a valid TLS ClientHello or that the relay reaches the intended destination. Verify using a relay you control and a destination you are authorized to test.
 
@@ -77,9 +77,18 @@ The Worker code cannot provide a reliable account-wide rate or concurrent-connec
 
 Do not interpret a request-rate rule as a concurrent-connection or bandwidth quota. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that is a separate implementation gate and is not claimed by the current PR.
 
+### Relay circuit breaker behavior
+
+- Applies only to relay endpoints explicitly listed in `RELAY_ENDPOINTS`; it never switches between `direct`, `relay`, and `socks5` modes.
+- Opens an endpoint circuit after 3 consecutive connection-establishment failures.
+- Keeps the circuit open for 30 seconds, then permits one half-open probe at a time within the current Worker isolate.
+- A successful probe closes the circuit; a failed probe reopens it.
+- State is isolate-local and may be lost on isolate replacement. It is not a global circuit breaker and does not coordinate health across all Worker instances.
+- Failover attempts other configured relay endpoints in deterministic order. If all are open or fail, the connection fails closed.
+
 ### DNS and destination boundary
 
-The allowlist prevents a client from choosing arbitrary hostnames, but hostname allowlisting alone cannot prove which IP address a hostname resolves to at connection time. The current Cloudflare TCP socket path does not perform an application-controlled DNS resolution-and-pinning check before connect. Therefore:
+The allowlist prevents a client from choosing arbitrary hostnames, but hostname allowlisting alone cannot prove which IP address a hostname resolves to at connection time. The current outbound paths do not yet enforce a common, application-controlled DNS resolution-and-pinning policy at the actual egress resolver. In particular, SOCKS5 and relay upstreams may resolve destination names remotely. Therefore:
 - use only narrow, trusted destination hostnames controlled by reputable service operators;
 - do not add user-controlled or arbitrary third-party hostnames;
 - treat DNS rebinding resistance as a known limitation until a supported resolution/pinning design is implemented and tested;
@@ -120,7 +129,7 @@ A passing TypeScript build or unit-test suite is not a substitute for the zone-l
 
 - TCP only; no UDP ASSOCIATE.
 - Relay mode is TLS/SNI pass-through on port 443, not a general-purpose relay for arbitrary protocols.
-- Relay selection is deterministic per destination within an isolate; no health scoring or automatic failover.
+- Relay selection is deterministic per destination within an isolate, with failover only among explicitly configured relay endpoints and isolate-local circuit breaking. Circuit state is not global across Worker isolates.
 - SOCKS5 supports CONNECT only; no UDP ASSOCIATE.
 - No built-in public relay list. Public feed entries have unknown ownership, authorization, location, and stability and are not trusted by default.
 - Typecheck and automated tests must pass before this implementation is considered build-verified. Live deployment and end-to-end traffic tests are separate later gates; do not infer them from CI success.
