@@ -21,7 +21,7 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 
 | Name | Type | Required | Purpose |
 |---|---|---:|---|
-| `UUID` | Secret | Yes | VLESS client UUID |
+| `UUID` | Secret | Yes | VLESS client UUID; configure with `npx wrangler secret put UUID`, never commit it in `wrangler.toml` |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
 | `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
 | `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |
@@ -32,6 +32,18 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 | `SOCKS5_PORT` | Variable | No | SOCKS5 port; defaults to 1080 |
 | `SOCKS5_USERNAME` | Secret | No | Set together with password |
 | `SOCKS5_PASSWORD` | Secret | No | Set together with username |
+
+Set credentials as Cloudflare Worker secrets (run from the project directory):
+
+```bash
+npx wrangler secret put UUID
+# Only when using an authenticated SOCKS5 upstream:
+npx wrangler secret put SOCKS5_USERNAME
+npx wrangler secret put SOCKS5_PASSWORD
+```
+
+Do not add a shared/default UUID to `wrangler.toml` or source control. Generate a unique UUID for your deployment and store it as the `UUID` secret. The checked-in `wrangler.toml` intentionally keeps `PROXY_ENABLED=false`.
+
 
 Example safe initial configuration:
 
