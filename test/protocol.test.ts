@@ -23,7 +23,7 @@ describe("V1 request parser", () => {
 
   it("rejects an incorrect UUID", () => {
     expect(() => parseV1Request(makeRequest("example.com"), "10000000-0000-4000-8000-000000000001"))
-      .toThrow("Invalid VLESS UUID");
+      .toThrow("Invalid V1 UUID");
   });
 
   it.each(["", "not-a-uuid", "00000000-0000-4000-8000-00000000000z"])(
@@ -55,7 +55,7 @@ describe("V1 request parser", () => {
   it("rejects UDP command", () => {
     const data = makeRequest("example.com");
     data[18] = 2;
-    expect(() => parseV1Request(data, UUID)).toThrow("Only VLESS TCP");
+    expect(() => parseV1Request(data, UUID)).toThrow("Only V1 TCP");
   });
 });
 
