@@ -182,15 +182,17 @@ Do not enable the proxy or merge this as production-ready until all checks below
 
 | Test | Required result | Current verification scope |
 |---|---|---|
-| Proxy disabled | WebSocket proxy returns 503 and opens no outbound socket | Worker unit/integration test |
+| Proxy disabled | Generic 404; no outbound socket is opened | Worker unit/integration test |
 | Missing UUID / wrong UUID | Connection rejected before outbound socket creation | VLESS parser + integration test |
 | Host not on allowlist | Connection rejected before outbound socket creation | Host allowlist unit/integration test |
-| Domain filter disabled | No hostname allowlist is required when `DOMAIN_FILTER_ENABLED=false` | Security helper + handler test |\n| Domain filter enabled | Missing or malformed `ALLOWED_HOSTS` fails closed | Configuration test |\n| Root-domain matching | `google.com` authorizes `google.com` and `sub.google.com`, but not `evilgoogle.com` or `google.com.evil.net` | Host allowlist unit test |
+| Domain filter disabled | No hostname allowlist is required when `DOMAIN_FILTER_ENABLED=false` | Security helper + handler test |
+| Domain filter enabled | Missing or malformed `ALLOWED_HOSTS` fails closed | Configuration test |
+| Root-domain matching | `google.com` authorizes `google.com` and `sub.google.com`, but not `evilgoogle.com` or `google.com.evil.net` | Host allowlist unit test |
 | Wildcard or malformed allowlist | Configuration rejected closed | Host allowlist unit test |
 | Port not allowed | Connection rejected before outbound socket creation | Integration test |
 | Unapproved relay/SOCKS upstream | Not selectable unless explicitly configured by operator | Configuration review + integration test |
 | Sensitive/admin paths | Generic 404; no config or secret disclosure | HTTP handler test |
-| Excess request rate | Cloudflare edge rule limits repeated handshakes | Zone-level test required |
+| Excess request rate | Not enforceable with owner-managed zone rules on the current managed `workers.dev` hostname; configure a rate-limit rule only after moving to a zone you control | Not available on current `workers.dev` deployment |
 | Excess concurrent connections / bytes | Shared quota blocks excess usage | Not implemented; Durable Object/control-plane gate |
 | DNS rebinding | Must not be represented as solved by hostname allowlisting | Design limitation; resolution/pinning work required |
 | Secret leakage | UUID and SOCKS credentials absent from logs, URLs, health output, and committed config | Code review + log inspection |
