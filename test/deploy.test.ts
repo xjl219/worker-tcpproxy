@@ -38,7 +38,7 @@ describe("secure deployment UUID handling", () => {
     try {
       saveGeneratedUuid(UUID, directory);
       const credentialPath = join(directory, ".wrangler", "proxy-uuid.txt");
-      expect(readFileSync(credentialPath, "utf8")).toBe(UUID + "\\n");
+      expect(readFileSync(credentialPath, "utf8")).toBe(UUID + "\n");
       expect(statSync(credentialPath).mode & 0o777).toBe(0o600);
     } finally {
       rmSync(directory, { recursive: true, force: true });
