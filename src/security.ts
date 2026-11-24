@@ -29,21 +29,13 @@ export function parseAllowedHosts(raw: string | undefined): Set<string> {
   return hosts;
 }
 
-export function isDomainFilterEnabled(raw: string | undefined): boolean {
-  return raw?.trim().toLowerCase() === "true";
-}
-
 /**
- * Each configured root domain authorizes the apex and its DNS subdomains.
- * The dot boundary prevents "evil-example.com" matching "example.com".
+ * Only the exact normalized hostname is authorized. Parent domains never
+ * implicitly authorize subdomains.
  */
 export function isAllowedDestinationHost(hostname: string, allowed: Set<string>): boolean {
   try {
-    const host = normalizeDestinationHostname(hostname);
-    for (const root of allowed) {
-      if (host === root || host.endsWith("." + root)) return true;
-    }
-    return false;
+    return allowed.has(normalizeDestinationHostname(hostname));
   } catch {
     return false;
   }
