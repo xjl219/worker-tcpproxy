@@ -77,8 +77,8 @@ function readSavedUuid() {
   return validateUuid(readFileSync(savedPath, "utf8"));
 }
 
-function saveGeneratedUuid(uuid) {
-  const directory = join(process.cwd(), ".wrangler");
+export function saveGeneratedUuid(uuid, rootDirectory = process.cwd()) {
+  const directory = join(rootDirectory, ".wrangler");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   writeFileSync(join(directory, "proxy-uuid.txt"), uuid + String.fromCharCode(10), { mode: 0o600 });
 }
@@ -106,6 +106,10 @@ async function main() {
     runWrangler(["deploy"]);
     return;
   }
+
+  // Persist a newly generated credential before deployment so a failed deployment can
+  // be retried with the same UUID. The file is ignored by Git and has restrictive permissions.
+  if (!configuredUuid && !savedUuid) saveGeneratedUuid(decision.uuid);
 
   // Wrangler consumes secrets-file during the deployment itself. Keep the short-lived
   // file outside the repository, restrict its permissions, and always remove it.
