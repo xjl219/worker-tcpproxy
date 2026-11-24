@@ -23,7 +23,7 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 |---|---|---:|---|
 | `UUID` | Secret | Yes | VLESS client UUID; the secure deploy command creates it on first deployment and reuses the Cloudflare secret on later deployments |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
-| `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
+| `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |\n| `HEALTH_ENABLED` | Variable | No | Defaults to `false`; set to `true` only if public liveness monitoring is required |
 | `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |
 | `ALLOWED_HOSTS` | Variable | When filtering is enabled | Comma-separated DNS root domains; each entry allows that domain and its subdomains. No wildcard, URL, path, port, or IP-literal entries. |
 | `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
