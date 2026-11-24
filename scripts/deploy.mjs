@@ -65,7 +65,7 @@ function listRemoteSecretNames() {
   // A missing Worker is expected on first deployment. Other failures (especially
   // authentication/permission errors) must stop instead of risking credential rotation.
   if (diagnostic.includes("worker not found") || diagnostic.includes("script not found") ||
-      diagnostic.includes("worker does not exist") || diagnostic.includes("script does not exist")) {
+      diagnostic.includes("worker does not exist") || diagnostic.includes("script does not exist") || diagnostic.includes("10007")) {
     return null;
   }
   throw new Error("Unable to inspect Cloudflare Worker secrets; refusing to rotate the proxy UUID");
@@ -84,7 +84,7 @@ function saveGeneratedUuid(uuid) {
 }
 
 async function main() {
-  const configuredUuid = process.env.PROXY_UUID ?? process.env.UUID;
+  const configuredUuid = process.env.PROXY_UUID || process.env.UUID;
   let secretNames = new Set();
   let remoteWorkerExists = true;
   let savedUuid;
