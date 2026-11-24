@@ -85,7 +85,7 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 - UUID authentication and `ALLOWED_PORTS` restrictions apply to all modes. Domain filtering is optional and disabled by default; when `DOMAIN_FILTER_ENABLED=true`, `ALLOWED_HOSTS` applies root-domain-plus-subdomain matching with a DNS-label boundary.
 - Private/local IP literals are rejected by the VLESS parser.
 - No fallback between direct, relay, and SOCKS5 modes.
-- Unauthenticated root and unknown paths return a generic 404; `/health` returns only `{ "ok": true }` and does not disclose mode or configuration. A disabled or incompletely configured proxy also returns a generic 404.
+- Root, unknown paths, non-GET probes, and non-WebSocket requests to `/ws` return the same generic 404. `/health` is disabled by default (`HEALTH_ENABLED=false`); if explicitly enabled, it returns only `{ "ok": true }`. A disabled or incompletely configured proxy also returns a generic 404.
 - WebSocket policy failures use a generic close reason; detailed auth, destination, and upstream errors are not returned to clients.
 - HTTP endpoints retain method/path checks and security response headers.
 - WebSocket messages and buffered output remain bounded.
@@ -94,15 +94,16 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 
 The Worker code cannot provide a reliable account-wide rate or concurrent-connection quota across independent isolates. Before enabling production traffic, configure controls on the Cloudflare zone/hostname:
 
-1. Add a WAF custom rule for the proxy hostname: allow only the intended `/ws` path and `/health` if external monitoring is needed; block requests to all other paths. Keep the Worker's own generic 404 checks as a second layer.
-2. Add a rate-limiting rule scoped to `/ws`, keyed by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Verify the rule actually applies to WebSocket Upgrade requests before relying on it.
-3. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.
-4. Consider disabling the public `/health` route at the Cloudflare edge if external monitoring is not needed; if retained, it exposes only a generic liveness bit.
-5. Do not assume a hidden path or generic 404 prevents discovery. Treat the UUID as the actual client authentication secret.
-6. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
-7. Keep `PROXY_ENABLED=false` until these rules have been verified.
+1. Use a custom domain in a Cloudflare zone you control for production. Zone-level WAF custom rules do not give you the same control over the managed `workers.dev` hostname. After confirming the custom domain works, disable the Worker's `workers.dev` route so scanners cannot bypass the zone rules through the alternate hostname.
+2. Add a WAF custom rule for that hostname to block every path except `/ws` (and `/health` only if `HEALTH_ENABLED=true`). Example expression: `(http.host eq "proxy.example.com" and http.request.uri.path ne "/ws")`; action: Block. Keep the Worker's own generic 404 checks as a second layer.
+3. Add a rate-limiting rule scoped to `/ws`, counted by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Verify the rule actually applies to WebSocket Upgrade requests before relying on it. On Free plans, rate-limiting expression fields and rule counts are more limited; a path-only expression may be necessary.
+4. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.
+5. Leave `HEALTH_ENABLED=false` unless external liveness monitoring is needed. If enabled, it exposes only a generic liveness bit.
+6. Do not assume a hidden path or generic 404 prevents discovery. Treat the UUID as the actual client authentication secret.
+7. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
+8. Keep `PROXY_ENABLED=false` until these rules have been verified.
 
-Do not interpret a request-rate rule as a concurrent-connection or bandwidth quota. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that is a separate implementation gate and is not claimed by the current PR.
+Do not interpret a request-rate rule as a concurrent-connection or bandwidth quota. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that is a separate implementation gate and is not claimed by the current PR. Cloudflare WAF only evaluates the initial HTTP WebSocket Upgrade; it does not inspect frames after the connection is established.
 
 ### Relay circuit breaker behavior
 
