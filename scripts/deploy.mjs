@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -53,20 +56,28 @@ async function main() {
   let secretNames = new Set();
 
   if (configuredUuid === undefined || configuredUuid === "") {
-    const output = runWrangler(["secret", "list", "--json"]);
+    const output = runWrangler(["secret", "list", "--format", "json"]);
     secretNames = parseSecretNames(output);
   }
 
   const decision = resolveDeploymentUuid({ configuredUuid, secretNames });
-  if (decision.action === "set") {
-    // Send the credential over stdin; never print it or write it into the repository.
-    runWrangler(["secret", "put", "UUID"], decision.uuid + "\n");
-    process.stdout.write(configuredUuid ? "Using supplied UUID secret.\n" : "Generated and stored a new UUID secret.\n");
-  } else {
+  if (decision.action === "reuse") {
     process.stdout.write("Reusing the existing Cloudflare UUID secret.\n");
+    runWrangler(["deploy"]);
+    return;
   }
 
-  runWrangler(["deploy"]);
+  // Wrangler consumes secrets-file during the deployment itself. Keep the short-lived
+  // file outside the repository, restrict its permissions, and always remove it.
+  const tempDirectory = mkdtempSync(join(tmpdir(), "worker-tcpproxy-"));
+  const secretsFile = join(tempDirectory, "secrets.json");
+  try {
+    writeFileSync(secretsFile, JSON.stringify({ UUID: decision.uuid }), { mode: 0o600, flag: "wx" });
+    runWrangler(["deploy", "--secrets-file", secretsFile]);
+  } finally {
+    rmSync(tempDirectory, { recursive: true, force: true });
+  }
+  process.stdout.write(configuredUuid ? "Deployed with the supplied UUID secret.\\n" : "Generated and deployed a new UUID secret.\\n");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
