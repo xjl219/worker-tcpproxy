@@ -47,6 +47,12 @@ describe("VLESS request parser", () => {
     },
   );
 
+  it("rejects malformed UTF-8 in a domain destination", () => {
+    const data = makeRequest("example.com");
+    data[23] = 0xff;
+    expect(() => parseVlessRequest(data, UUID)).toThrow();
+  });
+
   it("rejects UDP command", () => {
     const data = makeRequest("example.com");
     data[18] = 2;
