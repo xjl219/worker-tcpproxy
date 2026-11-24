@@ -27,6 +27,14 @@ describe("VLESS request parser", () => {
       .toThrow("Invalid VLESS UUID");
   });
 
+  it.each(["", "not-a-uuid", "00000000-0000-4000-8000-00000000000z"])(
+    "rejects an absent or malformed configured UUID (%s)",
+    (configuredUuid) => {
+      expect(() => parseVlessRequest(makeRequest("example.com"), configuredUuid))
+        .toThrow("UUID must be a valid");
+    },
+  );
+
   it.each(["10.0.0.1", "127.0.0.1", "169.254.1.1", "192.168.1.1", "100.64.0.1", "198.18.0.1", "203.0.113.1"])(
     "rejects non-public IPv4 destination %s", (host) => {
       expect(() => parseVlessRequest(makeRequest(host, 443, 1), UUID)).toThrow("Private or local");
