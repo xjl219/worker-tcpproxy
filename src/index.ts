@@ -284,10 +284,10 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return response("Expected WebSocket upgrade", 426);
   }
-  if (env.PROXY_ENABLED !== "true") return response("Proxy is disabled", 503);
+  if (env.PROXY_ENABLED !== "true") return response("Not found", 404);
   const domainFilterEnabled = isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED);
   if (!env.UUID || !isOutboundConfigured(env) || (domainFilterEnabled && !hasValidAllowedHosts(env))) {
-    return response("Proxy is not configured", 503);
+    return response("Not found", 404);
   }
 
   const pair = new WebSocketPair();
@@ -335,8 +335,8 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
       if (!upstreamWriter) throw new Error("Upstream is not ready");
       await upstreamWriter.write(bytes);
     }).catch(async (error: unknown) => {
-      const reason = error instanceof Error ? error.message : "proxy error";
-      await closeBoth(1008, reason);
+      // Never disclose whether authentication, destination policy, or upstream setup failed.
+      await closeBoth(1008, "connection rejected");
     });
   });
 
@@ -353,15 +353,10 @@ export default {
     if (request.method !== "GET") return response("Method not allowed", 405, { allow: "GET" });
 
     if (url.pathname === "/health") {
-      const mode = (env.OUTBOUND_MODE || "direct").trim().toLowerCase();
-      return Response.json(
-        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: isOutboundConfigured(env), domainFilterEnabled: isDomainFilterEnabled(env.DOMAIN_FILTER_ENABLED), allowedHostsConfigured: hasValidAllowedHosts(env) },
-        { headers: SECURITY_HEADERS },
-      );
+      // Keep health output intentionally generic; never expose proxy mode or configuration state.
+      return Response.json({ ok: true }, { headers: SECURITY_HEADERS });
     }
-    if (url.pathname === "/") {
-      return response("Worker TCP Proxy is running.", 200, { "content-type": "text/plain; charset=utf-8" });
-    }
+    if (url.pathname === "/") return response("Not found", 404);
     if (url.pathname === "/ws") return handleWebSocket(request, env);
     return response("Not found", 404);
   },
