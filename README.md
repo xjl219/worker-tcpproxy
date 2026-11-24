@@ -44,11 +44,11 @@ npm run deploy
 The deploy script performs these steps before `wrangler deploy`:
 
 1. If the deployment environment contains `PROXY_UUID` (preferred) or `UUID`, validate it and store it as the Cloudflare `UUID` secret.
-2. Otherwise, query the Cloudflare secret *names*. If a `UUID` secret already exists, keep it unchanged so redeployments do not invalidate existing client profiles.
+2. Otherwise, query the Cloudflare secret *names* with `wrangler secret list --format json`. If a `UUID` secret already exists, keep it unchanged so redeployments do not invalidate existing client profiles.
 3. If no `UUID` secret exists, generate a cryptographically random UUID v4 and send it directly to `wrangler secret put UUID` over stdin.
 4. Deploy only after the secret step succeeds.
 
-The generated UUID is never written to source files, command-line arguments, or deployment output. The script only reports whether it generated, reused, or accepted a supplied secret. If Wrangler cannot return a valid secret listing, deployment stops rather than generating a replacement and unexpectedly rotating credentials.
+The generated UUID is never written to source files, command-line arguments, or deployment output. The script only reports whether it generated, reused, or accepted a supplied secret. If Wrangler cannot return a valid secret listing, deployment stops rather than generating a replacement and unexpectedly rotating credentials. Existing Cloudflare secrets are retained by normal deployments when no replacement is supplied.
 
 To intentionally rotate the credential, supply a new UUID for one deployment:
 
