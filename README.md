@@ -24,7 +24,7 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 | `UUID` | Secret | Yes | VLESS client UUID |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
 | `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
-| `ALLOWED_HOSTS` | Variable | Yes | Comma-separated exact DNS hostnames; no wildcard, URL, path, port, or IP-literal entries |
+| `DOMAIN_FILTER_ENABLED` | Variable | No | Domain allowlist switch; defaults to `false`. Only literal `true` enables filtering. |\n| `ALLOWED_HOSTS` | Variable | When filtering is enabled | Comma-separated DNS root domains; each entry allows that domain and its subdomains. No wildcard, URL, path, port, or IP-literal entries. |
 | `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
 | `RELAY_ENDPOINTS` | Variable | Relay only | Comma-separated `host:port` relay endpoints |
 | `SOCKS5_HOST` | Variable | SOCKS5 only | Authorized SOCKS5 server hostname/IP |
@@ -36,7 +36,7 @@ Example safe initial configuration:
 
 - `OUTBOUND_MODE=direct`
 - `PROXY_ENABLED=false` until access controls and destinations have been reviewed
-- `ALLOWED_HOSTS` contains only the exact hosts you are authorized to access
+- `DOMAIN_FILTER_ENABLED=false` (default); `ALLOWED_HOSTS` may be left unset while filtering is disabled
 
 For relay mode, configure only relay endpoints that you own or are explicitly authorized to use. Each entry uses `host:port`; the current v1 parser expects a hostname or IPv4-style host and does not support bracketed IPv6 endpoints. The same destination hostname always selects the same configured relay within an isolate. There is no health-based failover or automatic public feed ingestion in v1.
 
@@ -46,7 +46,7 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 
 - Proxying is disabled unless `PROXY_ENABLED=true`.
 - VLESS UUID validation is required before any outbound socket is opened.
-- Exact-match `ALLOWED_HOSTS` and `ALLOWED_PORTS` restrictions apply to all modes.
+- UUID authentication and `ALLOWED_PORTS` restrictions apply to all modes. Domain filtering is optional and disabled by default; when `DOMAIN_FILTER_ENABLED=true`, `ALLOWED_HOSTS` applies root-domain-plus-subdomain matching with a DNS-label boundary.
 - Private/local IP literals are rejected by the VLESS parser.
 - No fallback between direct, relay, and SOCKS5 modes.
 - HTTP endpoints retain method/path checks and security response headers.
@@ -81,7 +81,7 @@ Do not enable the proxy or merge this as production-ready until all checks below
 | Proxy disabled | WebSocket proxy returns 503 and opens no outbound socket | Worker unit/integration test |
 | Missing UUID / wrong UUID | Connection rejected before outbound socket creation | VLESS parser + integration test |
 | Host not on allowlist | Connection rejected before outbound socket creation | Host allowlist unit/integration test |
-| Parent/suffix confusion | `google.com` does not authorize `evilgoogle.com` or `sub.google.com` | Host allowlist unit test |
+| Domain filter disabled | No hostname allowlist is required when `DOMAIN_FILTER_ENABLED=false` | Security helper + handler test |\n| Domain filter enabled | Missing or malformed `ALLOWED_HOSTS` fails closed | Configuration test |\n| Root-domain matching | `google.com` authorizes `google.com` and `sub.google.com`, but not `evilgoogle.com` or `google.com.evil.net` | Host allowlist unit test |
 | Wildcard or malformed allowlist | Configuration rejected closed | Host allowlist unit test |
 | Port not allowed | Connection rejected before outbound socket creation | Integration test |
 | Unapproved relay/SOCKS upstream | Not selectable unless explicitly configured by operator | Configuration review + integration test |
@@ -110,4 +110,4 @@ A passing TypeScript build or unit-test suite is not a substitute for the zone-l
 - Relay selection is deterministic per destination within an isolate; no health scoring or automatic failover.
 - SOCKS5 supports CONNECT only; no UDP ASSOCIATE.
 - No built-in public relay list. Public feed entries have unknown ownership, authorization, location, and stability and are not trusted by default.
-- This implementation has not yet passed typecheck, automated tests, live deployment, or end-to-end traffic tests. Treat it as an implementation candidate until those checks pass.
+- Typecheck and automated tests must pass before this implementation is considered build-verified. Live deployment and end-to-end traffic tests are separate later gates; do not infer them from CI success.
