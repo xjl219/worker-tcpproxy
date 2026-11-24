@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseVlessRequest } from "../src/vless";
 import { encodeSocksAddress } from "../src/socks5";
-import { isAllowedDestinationHost, isDomainFilterEnabled, normalizeDestinationHostname, parseAllowedHosts } from "../src/security";
+import { isAllowedDestinationHost, normalizeDestinationHostname, parseAllowedHosts } from "../src/security";
 
 const UUID = "00000000-0000-4000-8000-000000000001";
 
@@ -89,18 +89,18 @@ describe("destination hostname allowlist", () => {
     expect(isAllowedDestinationHost("gemini.google.com.", allowed)).toBe(true);
   });
 
-  it("allows the configured root domain and its true subdomains only", () => {
+  it("authorizes only the exact configured hostname", () => {
     const allowed = parseAllowedHosts("google.com");
     expect(isAllowedDestinationHost("google.com", allowed)).toBe(true);
-    expect(isAllowedDestinationHost("sub.google.com", allowed)).toBe(true);
+    expect(isAllowedDestinationHost("google.com.", allowed)).toBe(true);
+    expect(isAllowedDestinationHost("sub.google.com", allowed)).toBe(false);
     expect(isAllowedDestinationHost("evilgoogle.com", allowed)).toBe(false);
     expect(isAllowedDestinationHost("google.com.evil.net", allowed)).toBe(false);
   });
 
-  it("keeps domain filtering disabled unless explicitly enabled", () => {
-    expect(isDomainFilterEnabled(undefined)).toBe(false);
-    expect(isDomainFilterEnabled("false")).toBe(false);
-    expect(isDomainFilterEnabled("TRUE")).toBe(true);
+  it("returns an empty set for a missing allowlist so callers can fail closed", () => {
+    expect(parseAllowedHosts(undefined).size).toBe(0);
+    expect(parseAllowedHosts("").size).toBe(0);
   });
 
   it("rejects wildcard entries and URL-like allowlist values", () => {
