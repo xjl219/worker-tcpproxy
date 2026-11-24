@@ -116,7 +116,7 @@ Official references:
 4. Set `DOMAIN_FILTER_ENABLED=true` and a narrow `ALLOWED_HOSTS` list if the intended use case has a known destination set. If you deliberately need a general-purpose client proxy, understand that leaving the filter disabled allows any public destination on the configured destination ports to be requested by anyone who obtains the UUID. UUID secrecy is then the primary access control; this is not equivalent to a Cloudflare WAF allowlist.
 5. Keep `ALLOWED_PORTS` as narrow as the actual application requires. Do not expand it simply to make a failed connection work.
 6. Do not treat a descriptive `User-Agent` as authentication. If BIC blocks a legitimate client, configure a truthful, descriptive application User-Agent in that client if it supports the header. Do not impersonate a browser or add a fake browser signature. If the client cannot control User-Agent and receives 1010, the reliable fix is to move to a Custom Domain/Route in a zone you control, not to weaken UUID validation.
-7. After settings are reviewed, set `PROXY_ENABLED=true` and run the controlled handshake and data-transfer tests below. If any test fails, turn it back to `false` while diagnosing.
+7. After settings are reviewed, change the dashboard variable `PROXY_ENABLED` to `true` for the controlled handshake and data-transfer tests below. If any test fails, change it back to `false` while diagnosing.
 
 #### Access and WAF baseline
 
@@ -200,7 +200,7 @@ A passing TypeScript build or unit-test suite is not a substitute for the zone-l
 ## Staged verification
 
 1. Deploy under the separate Worker name in `wrangler.toml`; do not overwrite an existing service.
-2. Set `OUTBOUND_MODE=direct`, configure `UUID` and a narrow `ALLOWED_HOSTS`, and keep `PROXY_ENABLED=false`.
+2. Set `OUTBOUND_MODE=direct`, configure `UUID` and a narrow `ALLOWED_HOSTS`, and confirm the dashboard variable `PROXY_ENABLED=false`.
 3. Confirm `/health` returns only `{ "ok": true }`. It intentionally does not report the selected mode or configuration and does not test outbound connectivity.
 4. Enable only for a controlled test and verify a permitted destination.
 5. Record the observed egress IP and independently check its geolocation; a successful request does not prove a US exit.
