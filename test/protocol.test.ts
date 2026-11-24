@@ -41,6 +41,12 @@ describe("VLESS request parser", () => {
     },
   );
 
+  it.each(["2130706433", "127.1", "0177.0.0.1", "999.999.999.999", "localhost", "host..example.com"])(
+    "rejects non-canonical or non-public numeric/domain destination %s", (host) => {
+      expect(() => parseVlessRequest(makeRequest(host), UUID)).toThrow();
+    },
+  );
+
   it("rejects UDP command", () => {
     const data = makeRequest("example.com");
     data[18] = 2;
