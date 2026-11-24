@@ -90,20 +90,66 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 - HTTP endpoints retain method/path checks and security response headers.
 - WebSocket messages and buffered output remain bounded.
 
-### Mandatory Cloudflare-side controls
+### Entry protection and deployment: current workers.dev mode
 
-The Worker code cannot provide a reliable account-wide rate or concurrent-connection quota across independent isolates. Before enabling production traffic, configure controls on the Cloudflare zone/hostname:
+The current deployment uses a Cloudflare-managed `workers.dev` hostname. This is not equivalent to a custom domain in a Cloudflare zone you control:
 
-1. Use a custom domain in a Cloudflare zone you control for production. Zone-level WAF custom rules do not give you the same control over the managed `workers.dev` hostname. After confirming the custom domain works, disable the Worker's `workers.dev` route so scanners cannot bypass the zone rules through the alternate hostname.
-2. Add a WAF custom rule for that hostname to block every path except `/ws` (and `/health` only if `HEALTH_ENABLED=true`). Example expression: `(http.host eq "proxy.example.com" and http.request.uri.path ne "/ws")`; action: Block. Keep the Worker's own generic 404 checks as a second layer.
-3. Add a rate-limiting rule scoped to `/ws`, counted by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Verify the rule actually applies to WebSocket Upgrade requests before relying on it. On Free plans, rate-limiting expression fields and rule counts are more limited; a path-only expression may be necessary.
-4. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.
-5. Leave `HEALTH_ENABLED=false` unless external liveness monitoring is needed. If enabled, it exposes only a generic liveness bit.
-6. Do not assume a hidden path or generic 404 prevents discovery. Treat the UUID as the actual client authentication secret.
-7. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
-8. Keep `PROXY_ENABLED=false` until these rules have been verified.
+- You cannot create your own zone-level WAF custom rules or zone rate-limiting rules for the managed `workers.dev` hostname.
+- Cloudflare applies Browser Integrity Check (BIC) to `workers.dev` requests before they reach the Worker. BIC cannot be disabled for this hostname. Some automated clients with generic library User-Agent signatures can receive HTTP 1010 before Worker code runs; those requests will not appear in Worker logs.
+- Do not use Worker-level Cloudflare Access for this WebSocket service: Cloudflare documents that Worker-level Access policies currently reject WebSocket Upgrade requests with HTTP 403.
+- Hostname-based Access can protect a specific `workers.dev` hostname and is the only Access mode worth evaluating for this WebSocket endpoint. It requires a Zero Trust Access application and a Service Auth policy. The client must be able to add both `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers to its WebSocket handshake. Verify this capability in the exact VLESS client before enabling Access. If the client cannot set custom WebSocket headers, do not enable this policy: it will block legitimate connections. Treat the Service Token as a client-side secret that can be extracted from a device profile; use one token per device and rotate/revoke it if exposed. UUID authentication remains enabled as a second application-layer check.
 
-Do not interpret a request-rate rule as a concurrent-connection or bandwidth quota. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that is a separate implementation gate and is not claimed by the current PR. Cloudflare WAF only evaluates the initial HTTP WebSocket Upgrade; it does not inspect frames after the connection is established.
+Official references:
+- [workers.dev behavior, BIC, and disabling the route](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)
+- [Cloudflare Access for Workers and WebSocket limitation](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+- [Access Service Token request headers](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
+
+#### Required settings while using workers.dev
+
+1. Keep `workers_dev` enabled. Do not set `workers_dev = false` while this is the only public ingress; doing so removes the current production hostname. Do not disable it until a replacement Custom Domain or Route has been deployed and tested.
+2. Keep `HEALTH_ENABLED=false`. The health endpoint is not required for proxy operation and only adds a public path.
+3. Keep `PROXY_ENABLED=false` for the first deployment and configuration pass. Confirm the UUID secret is provisioned, the selected outbound mode is configured, and any upstream credentials are stored as Worker Secrets rather than in `wrangler.toml`.
+4. Set `DOMAIN_FILTER_ENABLED=true` and a narrow `ALLOWED_HOSTS` list if the intended use case has a known destination set. If you deliberately need a general-purpose client proxy, understand that leaving the filter disabled allows any public destination on the configured destination ports to be requested by anyone who obtains the UUID. UUID secrecy is then the primary access control; this is not equivalent to a Cloudflare WAF allowlist.
+5. Keep `ALLOWED_PORTS` as narrow as the actual application requires. Do not expand it simply to make a failed connection work.
+6. Do not treat a descriptive `User-Agent` as authentication. If BIC blocks a legitimate client, configure a truthful, descriptive application User-Agent in that client if it supports the header. Do not impersonate a browser or add a fake browser signature. If the client cannot control User-Agent and receives 1010, the reliable fix is to move to a Custom Domain/Route in a zone you control, not to weaken UUID validation.
+7. After settings are reviewed, set `PROXY_ENABLED=true` and run the controlled handshake and data-transfer tests below. If any test fails, turn it back to `false` while diagnosing.
+
+#### Optional Access hardening on workers.dev
+
+Only perform this if the exact client supports custom WebSocket handshake headers:
+
+1. In Zero Trust, create a Service Token dedicated to this proxy client. Do not reuse a token shared with unrelated applications.
+2. In Zero Trust > Access > Applications, create a Self-hosted application for the exact hostname `<worker-name>.<account-subdomain>.workers.dev`. Do not select the Worker-level "Protect this Worker" control.
+3. Add a policy with action **Service Auth** and authorize only the newly created Service Token.
+4. Configure the VLESS client's WebSocket headers with `CF-Access-Client-Id` and `CF-Access-Client-Secret`. Keep the existing VLESS UUID unchanged.
+5. Test from the actual client. Confirm the handshake reaches the Worker and the proxy works in both directions. A browser login page or HTTP 302 is not a successful proxy handshake.
+6. If the client cannot send these headers, remove/disable the Access application before retrying. Do not try to work around this by disabling UUID authentication.
+
+Access adds a pre-Worker identity gate, but it is not a substitute for application UUID validation, destination controls, or shared quotas. Service Token headers are credentials and must not be written to logs or committed to client profile repositories.
+
+#### Deployment sequence for the current workers.dev endpoint
+
+1. Run `npm ci`, `npm run check`, and `npx wrangler deploy --dry-run` locally or in CI.
+2. Verify the Cloudflare account and Worker name selected by Wrangler. This repository's config names the Worker `worker-tcpproxy-pluggable-v1`; do not deploy over a different production Worker by accident.
+3. Run `npm run deploy`. The script provisions/reuses the UUID secret without printing it. Preserve `.wrangler/proxy-uuid.txt` securely if this is the first generated UUID; never commit or share it.
+4. In the Worker settings, verify `PROXY_ENABLED=false`, `HEALTH_ENABLED=false`, the intended `OUTBOUND_MODE`, and the relevant upstream variables/secrets.
+5. Test the public hostname's BIC behavior with the actual VLESS client. An HTTP 1010 response is an edge rejection before Worker execution; it is not a VLESS UUID or Worker routing error.
+6. Test a deliberately invalid UUID and verify that no outbound connection is opened. Then test a valid UUID against an explicitly authorized destination and verify bidirectional traffic, reconnect behavior, and sustained transfer.
+7. Verify the observed egress IP and country independently. A successful WebSocket connection does not prove a US exit location.
+8. Only after the controlled tests pass, set `PROXY_ENABLED=true`. Keep a rollback path: set it back to `false` or redeploy the previous known-good version if the service behaves unexpectedly.
+
+#### What workers.dev does not provide for this service
+
+- No owner-managed zone WAF custom rule that blocks every path except `/ws`.
+- No owner-managed zone rate-limiting rule scoped to `/ws`.
+- No reliable global concurrent-connection or byte quota from Worker isolate-local state.
+- No guarantee that BIC accepts every non-browser WebSocket client.
+
+The application still returns a generic 404 for root, unknown paths, non-GET requests, and non-WebSocket requests to `/ws`; `/health` remains disabled by default. This reduces the HTTP surface but does not stop a scanner from discovering the WebSocket endpoint. The VLESS UUID is the actual application credential.
+
+If traffic volume or abuse risk grows, the production-grade path is to attach a Custom Domain in a zone you control, test it, add a WAF custom rule to allow only `/ws`, add a rate-limit rule for the handshake, and then disable `workers.dev`. Do not disable `workers.dev` before the replacement endpoint is confirmed. Cloudflare WAF evaluates the initial HTTP WebSocket Upgrade; it does not inspect frames after the connection is established.
+
+The Worker code cannot provide a reliable account-wide rate or concurrent-connection quota across independent isolates. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that remains a separate implementation gate and is not claimed by the current PR.
 
 ### Relay circuit breaker behavior
 
