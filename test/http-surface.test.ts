@@ -25,7 +25,7 @@ describe("public HTTP surface", () => {
 
   it("returns the same not-found response for root and unknown paths", async () => {
     for (const path of ["/", "/admin", "/robots.txt", "/.env"]) {
-      const response = await worker.fetch(new Request("https://worker.example" + path), baseEnv, {} as ExecutionContext);
+      const response = await worker.fetch(new Request("https://worker.example" + path), baseEnv);
       expect(response.status).toBe(404);
       expect(await response.text()).toBe("Not found");
     }
