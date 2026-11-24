@@ -24,7 +24,7 @@ VLESS client -> Cloudflare Worker -> selected outbound adapter
 | `UUID` | Secret | Yes | VLESS client UUID |
 | `OUTBOUND_MODE` | Variable | No | `direct` (default), `relay`, or `socks5` |
 | `PROXY_ENABLED` | Variable | Yes | Must be literal `true` to enable the WebSocket proxy |
-| `ALLOWED_HOSTS` | Variable | Yes | Comma-separated exact destination hostnames |
+| `ALLOWED_HOSTS` | Variable | Yes | Comma-separated exact DNS hostnames; no wildcard, URL, path, port, or IP-literal entries |
 | `ALLOWED_PORTS` | Variable | No | Comma-separated destination ports |
 | `RELAY_ENDPOINTS` | Variable | Relay only | Comma-separated `host:port` relay endpoints |
 | `SOCKS5_HOST` | Variable | SOCKS5 only | Authorized SOCKS5 server hostname/IP |
@@ -52,7 +52,46 @@ Relay mode forwards the original client TLS bytes; it does not create a new TLS 
 - HTTP endpoints retain method/path checks and security response headers.
 - WebSocket messages and buffered output remain bounded.
 
-Host allowlisting is not a complete DNS-rebinding defense. Use a narrow list of trusted destinations and keep this Worker private to intended clients. Configure Cloudflare WAF/rate limits for the deployed hostname.
+### Mandatory Cloudflare-side controls
+
+The Worker code cannot provide a reliable account-wide rate or concurrent-connection quota across independent isolates. Before enabling production traffic, configure controls on the Cloudflare zone/hostname:
+
+1. Add a WAF custom rule for the proxy hostname: allow only the intended `/ws` path and the minimal public health/root paths you actually need; block requests to all other paths. Keep the Worker's own generic 404 checks as a second layer.
+2. Add a rate-limiting rule scoped to `/ws`, keyed by source IP, with a conservative threshold based on measured legitimate reconnect behavior. Start in block/managed challenge mode supported for WebSocket handshakes by the zone; verify the rule actually applies to Upgrade requests before relying on it.
+3. Enable Cloudflare managed WAF protections and review Security Events after controlled tests. Do not use User-Agent as an authentication mechanism.
+4. Keep the Worker hostname and client UUID private. Rotate the UUID immediately if a client profile or credential is exposed.
+5. Keep `PROXY_ENABLED=false` until these rules have been verified.
+
+Do not interpret a request-rate rule as a concurrent-connection or bandwidth quota. A reliable global concurrency/byte quota requires a shared coordinator such as a Durable Object or an equivalent external control plane; that is a separate implementation gate and is not claimed by the current PR.
+
+### DNS and destination boundary
+
+The allowlist prevents a client from choosing arbitrary hostnames, but hostname allowlisting alone cannot prove which IP address a hostname resolves to at connection time. The current Cloudflare TCP socket path does not perform an application-controlled DNS resolution-and-pinning check before connect. Therefore:
+- use only narrow, trusted destination hostnames controlled by reputable service operators;
+- do not add user-controlled or arbitrary third-party hostnames;
+- treat DNS rebinding resistance as a known limitation until a supported resolution/pinning design is implemented and tested;
+- never claim that exact hostname matching alone eliminates SSRF or DNS-rebinding risk.
+
+### Pre-deployment security acceptance gate
+
+Do not enable the proxy or merge this as production-ready until all checks below have evidence:
+
+| Test | Required result | Current verification scope |
+|---|---|---|
+| Proxy disabled | WebSocket proxy returns 503 and opens no outbound socket | Worker unit/integration test |
+| Missing UUID / wrong UUID | Connection rejected before outbound socket creation | VLESS parser + integration test |
+| Host not on allowlist | Connection rejected before outbound socket creation | Host allowlist unit/integration test |
+| Parent/suffix confusion | `google.com` does not authorize `evilgoogle.com` or `sub.google.com` | Host allowlist unit test |
+| Wildcard or malformed allowlist | Configuration rejected closed | Host allowlist unit test |
+| Port not allowed | Connection rejected before outbound socket creation | Integration test |
+| Unapproved relay/SOCKS upstream | Not selectable unless explicitly configured by operator | Configuration review + integration test |
+| Sensitive/admin paths | Generic 404; no config or secret disclosure | HTTP handler test |
+| Excess request rate | Cloudflare edge rule limits repeated handshakes | Zone-level test required |
+| Excess concurrent connections / bytes | Shared quota blocks excess usage | Not implemented; Durable Object/control-plane gate |
+| DNS rebinding | Must not be represented as solved by hostname allowlisting | Design limitation; resolution/pinning work required |
+| Secret leakage | UUID and SOCKS credentials absent from logs, URLs, health output, and committed config | Code review + log inspection |
+
+A passing TypeScript build or unit-test suite is not a substitute for the zone-level WAF/rate-limit test, real outbound tests, or the remaining shared-quota and DNS-pinning work.
 
 ## Staged verification
 
