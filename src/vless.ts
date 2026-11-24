@@ -75,7 +75,7 @@ export function parseVlessRequest(data: Uint8Array, expectedUuid: string): Parse
     if (data.length < addressOffset + 1) throw new Error("Incomplete domain length");
     addressLength = data[addressOffset++];
     if (addressLength < 1 || data.length < addressOffset + addressLength) throw new Error("Invalid domain address");
-    const decodedHostname = new TextDecoder("utf-8", { fatal: true }).decode(data.subarray(addressOffset, addressOffset + addressLength));
+    const decodedHostname = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data.subarray(addressOffset, addressOffset + addressLength));
     hostname = normalizeDestinationHostname(decodedHostname);
   } else if (addressType === 0x03) {
     addressLength = 16;
