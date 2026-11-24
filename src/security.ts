@@ -1,15 +1,13 @@
 const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function normalizeDestinationHostname(input: string): string {
-  const host = input.trim().toLowerCase().replace(/\.$/, "");
+  const host = input.trim().toLowerCase().replace(/\\.$/, "");
   if (!host || host.length > 253 || host.includes("*") || host.includes("/") ||
       host.includes("@") || host.includes(":") || host.includes("%") ||
-      host.includes("\\") || /\s/.test(host)) {
-    throw new Error("Destination must be an exact DNS hostname");
+      host.includes("\\\\") || /\\s/.test(host)) {
+    throw new Error("Destination must be a DNS hostname");
   }
-  // Proxy destinations are intentionally restricted to DNS names. This avoids
-  // alternate IP literal forms and keeps the allowlist semantics unambiguous.
-  if (/^\d+(?:\.\d+){0,3}$/.test(host)) {
+  if (/^\\d+(?:\\.\\d+){0,3}$/.test(host)) {
     throw new Error("IP-literal destinations are not allowed");
   }
   const labels = host.split(".");
@@ -31,9 +29,21 @@ export function parseAllowedHosts(raw: string | undefined): Set<string> {
   return hosts;
 }
 
+export function isDomainFilterEnabled(raw: string | undefined): boolean {
+  return raw?.trim().toLowerCase() === "true";
+}
+
+/**
+ * Each configured root domain authorizes the apex and its DNS subdomains.
+ * The dot boundary prevents "evil-example.com" matching "example.com".
+ */
 export function isAllowedDestinationHost(hostname: string, allowed: Set<string>): boolean {
   try {
-    return allowed.has(normalizeDestinationHostname(hostname));
+    const host = normalizeDestinationHostname(hostname);
+    for (const root of allowed) {
+      if (host === root || host.endsWith("." + root)) return true;
+    }
+    return false;
   } catch {
     return false;
   }
