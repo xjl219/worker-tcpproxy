@@ -237,7 +237,7 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   const modeConfigured = mode === "direct" ||
     (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
     (mode === "relay" && relayCandidates(env).length > 0);
-  if (!env.UUID || !modeConfigured || allowedHosts(env).size === 0) {
+  if (!env.UUID || !modeConfigured || !hasValidAllowedHosts(env)) {
     return response("Proxy is not configured", 503);
   }
 
@@ -309,7 +309,7 @@ export default {
         (mode === "socks5" && Boolean(env.SOCKS5_HOST?.trim())) ||
         (mode === "relay" && relayCandidates(env).length > 0);
       return Response.json(
-        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: configured, allowedHostsConfigured: allowedHosts(env).size > 0 },
+        { ok: true, service: "worker-tcpproxy", outboundMode: mode, proxyEnabled: env.PROXY_ENABLED === "true", outboundConfigured: configured, allowedHostsConfigured: hasValidAllowedHosts(env) },
         { headers: SECURITY_HEADERS },
       );
     }
