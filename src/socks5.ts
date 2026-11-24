@@ -1,8 +1,12 @@
 export function encodeSocksAddress(hostname: string): Uint8Array {
   const host = hostname;
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4 && ipv4.every((part) => Number(part) <= 255)) {
-    return new Uint8Array([1, ...ipv4.map(Number)]);
+  if (ipv4) {
+    const octets = ipv4.slice(1).map(Number);
+    if (octets.some((part) => part < 0 || part > 255)) {
+      throw new Error("Invalid IPv4 destination");
+    }
+    return new Uint8Array([1, ...octets]);
   }
   if (host.includes(":")) {
     const halves = host.split("::");
