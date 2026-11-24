@@ -103,7 +103,9 @@ async function main() {
   });
   if (decision.action === "reuse") {
     process.stdout.write("Reusing the existing Cloudflare UUID secret.\n");
-    runWrangler(["deploy"]);
+    // Keep variables managed in Cloudflare Dashboard (including PROXY_ENABLED)
+    // instead of replacing them with the checked-in Wrangler configuration.
+    runWrangler(["deploy", "--keep-vars"]);
     return;
   }
 
@@ -117,7 +119,7 @@ async function main() {
   const secretsFile = join(tempDirectory, "secrets.json");
   try {
     writeFileSync(secretsFile, JSON.stringify({ UUID: decision.uuid }), { mode: 0o600, flag: "wx" });
-    runWrangler(["deploy", "--secrets-file", secretsFile]);
+    runWrangler(["deploy", "--keep-vars", "--secrets-file", secretsFile]);
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true });
   }
