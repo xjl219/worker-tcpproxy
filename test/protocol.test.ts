@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseVlessRequest } from "../src/vless";
 import { encodeSocksAddress } from "../src/socks5";
+import { isAllowedDestinationHost, isDomainFilterEnabled, normalizeDestinationHostname, parseAllowedHosts } from "../src/security";
 
 const UUID = "00000000-0000-4000-8000-000000000001";
 
@@ -62,18 +63,24 @@ describe("SOCKS5 destination address encoding", () => {
 });
 
 
-import { isAllowedDestinationHost, normalizeDestinationHostname, parseAllowedHosts } from "../src/security";
-
 describe("destination hostname allowlist", () => {
   it("normalizes case and a terminal DNS dot before exact matching", () => {
     const allowed = parseAllowedHosts("Gemini.Google.com");
     expect(isAllowedDestinationHost("gemini.google.com.", allowed)).toBe(true);
   });
 
-  it("does not treat a parent domain as a wildcard", () => {
+  it("allows the configured root domain and its true subdomains only", () => {
     const allowed = parseAllowedHosts("google.com");
+    expect(isAllowedDestinationHost("google.com", allowed)).toBe(true);
+    expect(isAllowedDestinationHost("sub.google.com", allowed)).toBe(true);
     expect(isAllowedDestinationHost("evilgoogle.com", allowed)).toBe(false);
-    expect(isAllowedDestinationHost("sub.google.com", allowed)).toBe(false);
+    expect(isAllowedDestinationHost("google.com.evil.net", allowed)).toBe(false);
+  });
+
+  it("keeps domain filtering disabled unless explicitly enabled", () => {
+    expect(isDomainFilterEnabled(undefined)).toBe(false);
+    expect(isDomainFilterEnabled("false")).toBe(false);
+    expect(isDomainFilterEnabled("TRUE")).toBe(true);
   });
 
   it("rejects wildcard entries and URL-like allowlist values", () => {
